@@ -2,13 +2,14 @@ Forked from https://github.com/weiwill88/Local_Pdf_Chat_RAG.
 
 # RecallMCP
 
-A local-first retrieval-augmented generation service: a FastAPI API over
-pluggable embeddings (sentence-transformers, or deterministic feature
-hashing for tests and demos), FAISS + BM25 hybrid retrieval and
-cross-encoder reranking. Everything runs on CPU with no paid API keys;
-hosted LLM providers are optional and configured through environment
-variables. A retrieval evaluation suite and an MCP server for agents are
-being built on this base.
+A local-first retrieval service: a FastAPI API over pluggable embeddings,
+FAISS + BM25 hybrid retrieval and optional cross-encoder reranking, with an
+SQLite embedding cache, health and readiness probes, request ids and JSON
+access logs. Everything runs on CPU. The deterministic hash embedder needs
+no model download, so the tests, the demo and the container image work
+offline; the sentence-transformers embedder is an opt-in extra. Answer
+generation uses a local Ollama server or any OpenAI-compatible endpoint
+and is optional: upload and retrieval work without an LLM.
 
 [![CI](https://github.com/vipul21435/recallmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/vipul21435/recallmcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -16,105 +17,268 @@ being built on this base.
 
 This repository is a fork of
 [weiwill88/Local_Pdf_Chat_RAG](https://github.com/weiwill88/Local_Pdf_Chat_RAG)
-(MIT, Will Wei), an educational RAG reference implementation. The upstream
-pipeline (document loading, chunking, embeddings, FAISS, BM25, hybrid merge,
-reranking, generation) is kept and reworked into a service that is measured
-rather than demoed: the Gradio UI is gone, the API is the only interface.
-See [CHANGELOG.md](CHANGELOG.md) for the full list of changes relative to
+(MIT, Will Wei), an educational RAG reference implementation with a Gradio
+UI. The upstream pipeline (document loading, chunking, embeddings, FAISS,
+BM25, hybrid merge, reranking, generation) is kept and reworked into a
+service that can be measured: the UI is gone and the API is the only
+interface. [CHANGELOG.md](CHANGELOG.md) lists every change relative to
 upstream.
 
 ## What I built on top
 
+Fork work only (`git log --author=vipul21435@iiitd.ac.in`):
+
 - The `ragsvc` package under `src/` with an application factory
   (`create_app(settings)`), typed and validated `RAG_` settings
-  (pydantic-settings) and the `recallmcp` CLI.
-- Local-first providers: a running Ollama is auto-detected, any
-  OpenAI-compatible endpoint works behind environment variables, and no
-  paid API is needed to run or test the service.
+  (pydantic-settings), the `recallmcp` CLI and a `uv.lock` on Python 3.12.
 - Pluggable embedding providers behind one protocol
-  (`ragsvc.embeddings`): sentence-transformers in production and a
+  (`ragsvc.embeddings`): sentence-transformers as the `neural` extra and a
   deterministic feature-hashing embedder (word unigrams and bigrams,
-  L2-normalised, no model download) that the tests and the demo use, plus
-  an SQLite embedding cache keyed by provider, model and text hash with
+  L2-normalised, no model) that the tests, the demo and the container use;
+  plus an SQLite embedding cache keyed by provider, model and text hash with
   hit and miss counters.
-- Security defaults: loopback bind, CORS allowlist without credentials,
-  an upload size cap and an optional bearer token.
+- `search_chunks`: a scored retrieval read path (one hybrid round plus the
+  configured reranker, no LLM) shared by the demo and the recursive
+  retriever, and `make demo`: three bundled documents, a re-index that
+  shows the cache working, three timed queries; under ten seconds, offline.
 - Operations endpoints and logs: `GET /health` (version, provider names,
-  index size, embedding cache counters) and `GET /ready`; an
-  `X-Request-ID` on every response (echoed or generated) that every log
-  record written during the request carries; JSON access logs with method,
-  path, status and duration.
+  index size, cache counters) and `GET /ready`; an `X-Request-ID` on every
+  response that every log record of the request carries; JSON access logs
+  with method, path, status and duration.
+- Security defaults: loopback bind, CORS allowlist without credentials, an
+  upload size cap and an optional bearer token.
 - A typed ingestion pipeline with per-file reports; a failed upload keeps
-  the previous knowledge base and concurrent uploads are serialized, with
-  new indexes swapped in as a snapshot.
+  the previous knowledge base, concurrent uploads are serialized and new
+  indexes are swapped in as a snapshot.
 - Structured `/api/ask` responses: sources from retrieval metadata, model
   reasoning as a separate field, `409` for an empty knowledge base and
   `502` for provider failures.
+- Local-first LLM configuration: a running Ollama is auto-detected and any
+  OpenAI-compatible endpoint works behind environment variables.
 - BM25 tokenization with a regex instead of jieba; English-only code,
   prompts and docs.
-- Ruff, strict mypy, pre-commit and GitHub Actions CI; tests run without
-  network access, model downloads or credentials (the suite uses the hash
-  embedder throughout).
+- A digest-pinned, non-root, two-stage `Dockerfile`, a `docker-compose.yml`
+  with a `/health` healthcheck, and GitHub Actions running ruff, strict
+  mypy, the tests with coverage, a Docker build and a container smoke test.
 
-## Pipeline
+## Architecture
 
 ```mermaid
 flowchart LR
-    A[Documents] --> B[Parsing]
-    B --> C[Chunking]
-    C --> D[Embeddings]
-    D --> E[FAISS]
-    C --> F[BM25]
-    E --> G[Hybrid retrieval]
-    F --> G
-    G --> H[Reranking]
-    H --> I[Context building]
-    I --> J[Generation]
-    J --> K[Answer and sources]
+    subgraph API["FastAPI (ragsvc.api)"]
+        UP["POST /api/upload"]
+        ASK["POST /api/ask"]
+        HP["GET /health, /ready, /api/status"]
+    end
+    subgraph Ingest["Write path (core.ingest)"]
+        LOAD["Loader: PDF, TXT, MD, DOCX, PPTX, XLSX"] --> SPLIT["Chunker"]
+        SPLIT --> EMB["Embedder"]
+        EMB --> FAISS["FAISS index"]
+        SPLIT --> BM25["BM25 index"]
+    end
+    subgraph Query["Read path (core.retriever)"]
+        QE["Embed query"] --> DS["Dense top-k"]
+        Q2["Tokenize"] --> SS["BM25 top-k"]
+        DS --> MERGE["Hybrid merge (alpha)"]
+        SS --> MERGE
+        MERGE --> RR["Reranker: cross-encoder, llm or none"]
+    end
+    CACHE[("SQLite embedding cache")]
+    EMB <--> CACHE
+    QE <--> CACHE
+    UP --> LOAD
+    ASK --> QE
+    ASK --> Q2
+    FAISS -.-> DS
+    BM25 -.-> SS
+    RR --> GEN["Context + prompt -> Ollama or OpenAI-compatible LLM"]
+    GEN --> ASK
+    HP -.-> CACHE
+    HP -.-> FAISS
 ```
 
 ## Quick start
 
-Requires [uv](https://docs.astral.sh/uv/). `uv sync` installs Python 3.12
-and the locked dependencies into `.venv`; torch is resolved from the PyTorch
-CPU index on Linux so no CUDA wheels are downloaded.
+Requires [uv](https://docs.astral.sh/uv/), which installs Python 3.12
+itself. Five commands from a fresh clone:
 
 ```bash
-git clone https://github.com/vipul21435/recallmcp.git
-cd recallmcp
-
-uv sync                    # runtime dependencies
-uv sync --extra documents  # also install DOCX / PPTX / Excel parsers
-cp .env.example .env       # optional: pick an LLM provider or tune retrieval
-
-uv run recallmcp           # or: uv run python -m ragsvc
+git clone https://github.com/vipul21435/recallmcp.git && cd recallmcp
+make install        # uv sync: locked dependencies, all extras and the dev tools
+make demo           # offline: hash embedder, 3 sample documents, 3 timed queries
+make test           # 171 tests with coverage; no network, models or credentials
+uv run recallmcp    # serve the API on http://127.0.0.1:17995
 ```
 
-The API listens on `127.0.0.1` and the first free port in `17995-17999`
-(`RAG_API_HOST`, `RAG_API_PORT`). Main endpoints:
+`make install` includes the `neural` extra (sentence-transformers and
+torch: the virtualenv measures 1.1 GB with it and 313 MB without). To
+stay lean run `uv sync --locked --extra documents --dev` instead and serve
+with `RAG_EMBEDDING_PROVIDER=hash RAG_RERANK_METHOD=none`; the demo and
+the tests do that on their own.
 
-- `GET /health`: liveness plus the version, the LLM, embedding and
-  reranker provider names, the index size and the embedding cache's hit and
-  miss counters; it never loads a model. `GET /ready` answers `200` once
-  documents are indexed and `503` before. Neither needs the API token;
-- `GET /api/status`: runtime and provider configuration status;
-- `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
-  XLS/XLSX with the `documents` extra) and rebuild the indexes from it.
-  Other formats get `415`; a document that yields no text is reported with
-  `status: error` and leaves the previous knowledge base in place;
-- `POST /api/ask`: ask a question against the indexed documents
-  (`{"question": "...", "provider": "ollama" | "openai" | null}`); answers
-  are plain text and carry the source documents, whether the sources
-  disagree, and the reasoning of thinking models (`<think>` blocks) as a
-  separate `reasoning` field.
+With the default settings the first upload downloads the embedding model
+(`all-MiniLM-L6-v2`, about 80 MB) and the first question the cross-encoder
+from the Hugging Face Hub. Answers need an LLM: a local
+[Ollama](https://ollama.com/) is used when one is running, otherwise an
+OpenAI-compatible endpoint configured through `RAG_OPENAI_*`; with neither,
+`/api/ask` returns `502` and everything else works.
 
-Embedding and reranking models are downloaded from the Hugging Face Hub on
-first use and cached locally; set `RAG_EMBEDDING_PROVIDER=hash` to run
-fully offline with deterministic (lexical, not semantic) embeddings.
-Answer generation needs an LLM: a local
-[Ollama](https://ollama.com/) server is used when one is running, otherwise
-any OpenAI-compatible endpoint configured through `RAG_OPENAI_*`. Without either,
-upload and retrieval work and `/api/ask` returns `502` with a clear message.
+### Docker
+
+```bash
+docker compose up --build            # http://127.0.0.1:17995, hash embedder, no reranker
+curl -s http://127.0.0.1:17995/health
+```
+
+The image is two-stage on a digest-pinned `python:3.12-slim`, runs as a
+non-root user and keeps the embedding cache in the `/data` volume. It
+installs no optional extras, so it needs no model download. For neural
+retrieval build with `--build-arg UV_SYNC_EXTRAS="--extra neural"` and run
+with `RAG_EMBEDDING_PROVIDER=sentence-transformers` and
+`RAG_RERANK_METHOD=cross_encoder`. The container binds `0.0.0.0` inside
+its network namespace; compose publishes the port on `127.0.0.1` only. Set
+`RAG_API_TOKEN` before exposing it further.
+
+## Reference
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `uv run recallmcp` (or `python -m ragsvc`) | Serve the API on `RAG_API_HOST:RAG_API_PORT` (default `127.0.0.1`, first free port in `17995-17999`) |
+| `make demo` | Run `examples/demo.py`: ingest `examples/docs/`, re-ingest, three timed queries, cache counters |
+| `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is what GitHub Actions runs |
+| `make docker-build`, `make docker-up` | Build `recallmcp:dev`; start it with compose |
+
+### HTTP API
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness: `version`, `providers` (llm, embedding, embedding_model, reranker), `index` (ready, chunks, type) and `embedding_cache` (enabled, entries, hits, misses). Never loads a model. No token needed. |
+| `GET /ready` | `200 {"status": "ready", "chunks": n}` once documents are indexed, `503 {"status": "not_ready", ...}` before. No token needed. |
+| `GET /api/status` | Runtime and provider configuration: default LLM provider, models, whether OpenAI and SerpAPI keys are configured, index size. |
+| `POST /api/upload` | Multipart `file`: PDF, TXT, Markdown (DOCX, PPTX, XLS/XLSX with the `documents` extra). Rebuilds the knowledge base from that file. `415` for other formats, `413` over `RAG_MAX_UPLOAD_MB`; a document with no text answers `status: error` and keeps the previous knowledge base. |
+| `POST /api/ask` | `{"question": "...", "provider": "ollama" \| "openai" \| null, "enable_web_search": false}`. Returns `answer`, `reasoning` (thinking-model output, or null), `sources` and `metadata`. `409` when nothing is indexed, `502` when the LLM fails. |
+
+Every response carries `X-Request-ID` (echoed when the client sends a
+printable ASCII id of up to 128 characters, generated otherwise). With
+`RAG_API_TOKEN` set, `/api` routes require `Authorization: Bearer <token>`.
+
+```bash
+curl -s -F file=@examples/docs/hybrid-retrieval.md http://127.0.0.1:17995/api/upload
+curl -s http://127.0.0.1:17995/ready
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"question": "How are dense and BM25 scores combined?"}' http://127.0.0.1:17995/api/ask
+```
+
+### Python API
+
+- `ragsvc.api.create_app(settings=None) -> FastAPI`: the application
+  factory; explicit settings become the process-wide settings.
+- `ragsvc.core.ingest.ingest_files(sources) -> IngestReport`: rebuild both
+  indexes from `SourceFile`s; per-file `chunks` and `error`.
+- `ragsvc.core.retriever.search_chunks(query, top_k=None) -> RankedDocs`:
+  scored `(chunk_id, {"score", "content", "metadata"})` pairs, best first;
+  one hybrid round plus the configured reranker, no LLM.
+- `ragsvc.embeddings.build_embedder(settings)`, `HashEmbedder`,
+  `SentenceTransformerEmbedder`, `EmbeddingCache`, `CachedEmbedder`.
+
+## Sample output
+
+`make demo` on this machine (Apple Silicon Mac, 8 cores, 8 GB RAM,
+Python 3.12; `RAG_EMBEDDING_PROVIDER=hash`, `RAG_RERANK_METHOD=none`):
+
+```text
+RecallMCP demo: embedder=hash, reranker=none
+
+Ingest: 3 files -> 22 chunks in 7 ms
+  embedding-cache.md: 6 chunks
+  hybrid-retrieval.md: 8 chunks
+  operations.md: 8 chunks
+  embedding cache after first ingest: entries=22 hits=0 misses=22
+Re-ingest (unchanged files): 22 chunks in 2 ms
+  embedding cache after re-ingest:    entries=22 hits=22 misses=22
+  GET /ready -> 200
+
+Query 1: 'How are dense and BM25 scores combined?'  (cold 7.49 ms, warm p50 0.08 ms over 19 runs)
+  1. score=0.860 source=hybrid-retrieval.md id=doc_2_chunk_3
+     Each retriever returns its best RAG_RETRIEVAL_TOP_K candidates. The hybrid merge scores...
+  2. score=0.784 source=hybrid-retrieval.md id=doc_2_chunk_2
+     chunks. BM25 rewards exact term matches, so identifiers, part numbers and rare words th...
+  3. score=0.700 source=operations.md id=doc_3_chunk_7
+     The container image runs as a non-root user, defaults to the hash embedder so it needs ...
+
+Query 2: 'What key does the embedding cache use?'  (cold 0.77 ms, warm p50 0.08 ms over 19 runs)
+  1. score=0.846 source=embedding-cache.md id=doc_1_chunk_0
+     # The embedding cache Embedding is the slow part of ingestion. A neural embedding model...
+  2. score=0.818 source=embedding-cache.md id=doc_1_chunk_3
+     The cache counts hits and misses since the process started. Every position in a lookup ...
+  3. score=0.720 source=hybrid-retrieval.md id=doc_2_chunk_6
+     reranking and keep the hybrid scores, which is what the demo does because the cross-enc...
+
+Query 3: 'What does GET /ready return before documents are indexed?'  (cold 0.73 ms, warm p50 0.09 ms over 19 runs)
+  1. score=1.000 source=operations.md id=doc_3_chunk_2
+     embedding model without loading it and reads the cache counters without embedding anyth...
+  2. score=0.796 source=embedding-cache.md id=doc_1_chunk_0
+     # The embedding cache Embedding is the slow part of ingestion. A neural embedding model...
+  3. score=0.560 source=hybrid-retrieval.md id=doc_2_chunk_4
+     zero to one. A chunk found by both retrievers gets the sum of both parts, which is why ...
+
+Query latency: cold p50 0.77 ms (3 first runs); warm p50 0.08 ms, p95 0.10 ms (57 runs)
+Embedding cache at exit: entries=25 hits=79 misses=25
+```
+
+The 25 entries are the 22 chunks plus the 3 query texts: query vectors go
+through the same cache, which is why a warm query is a cache lookup plus a
+FAISS and a BM25 search. Scores are hybrid scores (`0.7 * dense rank score
++ 0.3 * normalised BM25`), so `1.000` means first in both retrievers.
+
+## Benchmarks
+
+Measured on 2026-09-29 on this machine (Apple Silicon Mac, 8 cores, 8 GB
+RAM, Python 3.12, `uv 0.11.29`, Docker 29). Hash embedder (256
+dimensions), no reranker, exact `IndexFlatL2`; nothing here says anything
+about retrieval quality, which the hash embedder does not have.
+
+| Measurement | Command | Result |
+| --- | --- | --- |
+| Ingest 3 Markdown files, 22 chunks | `make demo` | 7 ms (first run, 22 cache misses) |
+| Re-ingest the same files | `make demo` | 2 ms, 22 cache hits, 0 new misses |
+| Query latency, first run of each query | `make demo` | p50 0.77 ms over 3 queries |
+| Query latency, query vector cached | `make demo` | p50 0.08 ms, p95 0.10 ms over 57 runs |
+| Whole demo, wall clock | `time make demo` | 9.2 s (of which `uv run` start-up and imports are most) |
+| Test suite | `uv run pytest --cov=ragsvc` | 171 tests in 1.9 s, 86% line coverage |
+| Container image | `docker build --no-cache -t recallmcp:dev .` | 102 s from an empty layer cache (base image already pulled); 105 MB image |
+
+## Design decisions
+
+- **A hash embedder as the offline default for tests, demo and image.**
+  It exercises the real ingest, index, search and cache path with vectors
+  that are identical on every machine, so retrieval assertions are exact
+  and CI needs no model download. It matches on shared words, not
+  meaning; production retrieval should use the `neural` extra.
+- **The model stack is an extra, not a dependency.** The `neural` extra
+  adds about 800 MB to the virtualenv; keeping it out of the default
+  install makes `uv sync`, the Docker build and CI fast and lets the API
+  run on machines that will never embed neurally.
+- **An SQLite cache keyed by provider, model and text hash.** One file,
+  standard library only, and changing `RAG_EMBED_MODEL_NAME` can never
+  serve vectors from the old model. Query vectors share the cache with
+  chunk vectors.
+- **Snapshot indexes and one ingestion lock.** Uploads replace the whole
+  knowledge base, so both indexes are built off to the side and installed
+  with one assignment; a concurrent `/api/ask` sees the old or the new
+  knowledge base, never a mix. The cost is that indexing is not
+  incremental.
+- **`/ready` means ready to answer.** It stays `503` until something is
+  indexed; `/health` is the liveness signal and reports configuration
+  without touching models or providers.
+- **Local-first security defaults.** Loopback bind, no CORS headers unless
+  origins are listed, an upload cap and an optional bearer token, instead
+  of upstream's `0.0.0.0` bind with reflected CORS origins and credentials.
+- **`search_chunks` is separate from `answer_question`.** Retrieval with
+  scores and no LLM is what a demo, a benchmark and an MCP tool need; the
+  generation path is layered on top rather than mixed in.
 
 ## Configuration
 
@@ -130,11 +294,11 @@ message naming the variable. Every variable is optional; see
 | `RAG_LLM_PROVIDER` | Force `ollama` or `openai` instead of auto-detecting |
 | `RAG_OLLAMA_BASE_URL`, `RAG_OLLAMA_MODEL` | Local Ollama server and model (`llama3.2`) |
 | `RAG_OPENAI_API_KEY`, `RAG_OPENAI_BASE_URL`, `RAG_OPENAI_MODEL` | Any OpenAI-compatible Chat Completions endpoint; the key and base URL are also read from `OPENAI_API_KEY` and `OPENAI_BASE_URL` |
-| `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` (default) or `hash` (deterministic feature hashing, no model) |
+| `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` (default; needs the `neural` extra) or `hash` (deterministic feature hashing, no model) |
 | `RAG_EMBED_MODEL_NAME` | Sentence-transformers embedding model (`all-MiniLM-L6-v2`) |
 | `RAG_HASH_EMBEDDING_DIMENSION` | Vector size of the hash provider (`256`) |
 | `RAG_EMBEDDING_CACHE_ENABLED`, `RAG_EMBEDDING_CACHE_PATH` | SQLite embedding cache (`true`, `.cache/recallmcp/embeddings.sqlite3`) |
-| `RAG_RERANK_METHOD`, `RAG_RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
+| `RAG_RERANK_METHOD`, `RAG_RERANK_MODEL_NAME` | `cross_encoder` (default; needs the `neural` extra), `llm` or `none`; cross-encoder model |
 | `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_HYBRID_ALPHA`, `RAG_RETRIEVAL_TOP_K`, `RAG_RERANK_TOP_K`, `RAG_MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
 | `RAG_SERPAPI_KEY` | Optional web-search credential (also `SERPAPI_KEY`) |
 | `RAG_API_HOST`, `RAG_API_PORT` | Bind address (`127.0.0.1`) and port (first free in `17995-17999`) |
@@ -151,11 +315,11 @@ implements: `embed_documents`, `embed_query`, `dimension`, `name` and
 
 - `sentence-transformers` (default): a neural model from the Hugging Face
   Hub, imported and loaded on first use so that importing the package and
-  building the app stay cheap.
+  building the app stay cheap. Needs `uv sync --extra neural`; without it
+  the first embedding fails with a message naming the fix.
 - `hash`: feature hashing of word unigrams and bigrams into a fixed-size
   L2-normalised vector. It needs no model, gives identical vectors on every
-  machine and is what the test suite and the demo use. It matches on shared
-  words, not meaning, so keep it out of production retrieval.
+  machine and is what the test suite, the demo and the container use.
 
 Vectors are kept in an SQLite cache keyed by `(provider, model,
 sha256(text))`, so re-indexing an unchanged document embeds nothing and
@@ -196,9 +360,6 @@ beyond a trusted network.
 
 ## Repository layout
 
-The service is the ``ragsvc`` package under ``src/``, installed in editable
-mode by ``uv sync``.
-
 ```text
 src/ragsvc/
   __init__.py              Package version
@@ -209,8 +370,8 @@ src/ragsvc/
   logging_setup.py         JSON / text log handler carrying the request id
   embeddings/
     base.py                EmbeddingProvider protocol and EmbeddingError
-    hashing.py             Deterministic feature-hashing embedder (tests, demo)
-    sentence_transformer.py  Lazily loaded sentence-transformers embedder
+    hashing.py             Deterministic feature-hashing embedder (tests, demo, container)
+    sentence_transformer.py  Lazily loaded sentence-transformers embedder (neural extra)
     cache.py               SQLite embedding cache and the cached wrapper
   core/
     document_loader.py     Document text extraction
@@ -218,48 +379,65 @@ src/ragsvc/
     embeddings.py          Process-wide embedding provider built from settings
     vector_store.py        FAISS index
     bm25_index.py          BM25 index
-    retriever.py           Hybrid and recursive retrieval
+    retriever.py           Hybrid round, search_chunks and recursive retrieval
     reranker.py            Result reranking
     generator.py           Context building and answer generation
     ingest.py              Ingestion pipeline shared by all entry points
   features/                Web search, conflict detection, reasoning-block splitting
   utils/                   HTTP session and port helpers
-tests/                     Tests that need no network access or credentials
+examples/
+  demo.py                  `make demo`
+  docs/                    Three sample Markdown documents
+tests/                     171 tests that need no network access or credentials
+Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 ```
 
 ## Development
 
 ```bash
-uv sync --all-extras --dev
-uv run ruff check . && uv run ruff format --check .   # lint and formatting
-uv run mypy                                          # strict type check
-uv run pytest                                        # tests
-uv run pre-commit install                            # run the checks on every commit
+make install     # uv sync --locked --all-extras --dev
+make lint        # ruff check and ruff format --check
+make typecheck   # strict mypy over src, tests and examples
+make test        # pytest with coverage
+make ci          # the three above, as GitHub Actions runs them
+uv run pre-commit install   # run the checks on every commit
 ```
 
 Tests run without network access, model downloads or API keys: the
 fixtures in `tests/conftest.py` install hermetic settings with the hash
 embedder and the embedding cache disabled. GitHub Actions runs lint, type
-check and tests on every push and pull request.
-
-## Design notes
-
-- The hash embedder is the default for tests and demos rather than a mocked
-  model: it exercises the real ingest, index and search path with vectors
-  that are identical on every machine, so retrieval assertions can be exact.
-- The embedding cache lives in SQLite (one file, standard library only)
-  and is keyed by provider and model as well as text, so changing
-  `RAG_EMBED_MODEL_NAME` can never serve vectors from the old model.
-- `/ready` means "ready to answer questions", so it stays `503` until
-  something is indexed; `/health` is the liveness signal and reports
-  configuration without touching models or providers.
+check and tests, then builds the container image, validates the compose
+file and checks `/health` and `/ready` on a running container.
 
 ## Known limitations
 
+- The hash embedder is lexical: synonyms do not match. Use the `neural`
+  extra for real semantic retrieval.
 - PDF extraction reads the text layer; there is no OCR.
-- The indexes live in process memory and are rebuilt on every upload.
+- The indexes live in process memory and are rebuilt on every upload; one
+  upload replaces the whole knowledge base.
 - Hosted model and web-search providers send the query to third parties;
   review your data boundary before enabling them.
+- There is no retrieval quality evaluation yet; the numbers above are
+  latency only.
+
+## What I would do next
+
+- A retrieval evaluation harness: a labelled query set over
+  `examples/docs/`, `recall@k`, MRR and nDCG computed through
+  `search_chunks`, reported per embedder and reranker, with a CI gate that
+  fails on regression.
+- Ingestion improvements: pluggable chunkers (sentence and Markdown-aware),
+  MinHash near-duplicate detection across documents and a collision ledger
+  for the embedding cache.
+- Reciprocal rank fusion as an alternative to the weighted hybrid merge,
+  and a query cache in front of `search_chunks`.
+- An MCP server exposing `search` and `ingest` as tools over the same
+  service, so agents can use the knowledge base directly.
+- Agent tasks with pytest graders that score an agent's answers against
+  the labelled query set.
+- A Typer CLI (`recallmcp ingest`, `recallmcp search`, `recallmcp serve`)
+  over the Python API.
 
 ## Contributing and security
 

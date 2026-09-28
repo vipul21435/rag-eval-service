@@ -8,6 +8,22 @@ restarts at 0.1.0.
 
 ### Added
 
+- `make demo` (`examples/demo.py`): ingests the three sample documents under
+  `examples/docs/` with the hash embedder, re-ingests them to show the
+  embedding cache hits, runs three queries through `search_chunks` and
+  prints scored chunks, cold and warm latency and the cache counters from
+  `GET /health`. Offline, no models.
+- `ragsvc.core.retriever.search_chunks(query, top_k)`: one hybrid round plus
+  the configured reranker, returning scored chunks without query rewriting
+  or generation. The recursive retriever shares the same `hybrid_round`.
+- `Makefile` with `install`, `lint`, `format`, `typecheck`, `test`, `demo`,
+  `ci`, `docker-build` and `docker-up`.
+- `Dockerfile` (two stages on a digest-pinned `python:3.12-slim`, non-root
+  user, hash embedder and no reranker by default, embedding cache under
+  `/data`, `HEALTHCHECK` on `/health`), `docker-compose.yml` with a
+  `/health` healthcheck and a named cache volume, and a CI job that builds
+  the image, validates the compose file and smoke-tests `/health` and
+  `/ready` in a running container.
 - `ragsvc.embeddings`: pluggable embedding providers behind an
   `EmbeddingProvider` protocol. `SentenceTransformerEmbedder` (the default)
   imports and loads its model on first use; `HashEmbedder` is deterministic
@@ -37,6 +53,10 @@ restarts at 0.1.0.
 
 ### Changed
 
+- sentence-transformers and torch are the optional `neural` extra
+  (`uv sync --extra neural`) instead of core dependencies; without it the
+  hash embedder and `RAG_RERANK_METHOD=none` run the service with no model
+  stack, and the first neural embedding fails with a message naming the fix.
 - The project is RecallMCP: `recallmcp` on GitHub and as the CLI name; the
   Python package is `ragsvc`.
 - Configuration is a typed, validated `Settings` object (pydantic-settings)
