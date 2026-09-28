@@ -8,13 +8,18 @@ combined by ``core.retriever.hybrid_merge``.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TypedDict
 
-import jieba
 import numpy as np
 from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
+
+_WORD = re.compile(r"\w+")
+# CJK Unified Ideographs (basic block and extension A).
+_CJK = re.compile(r"[㐀-䶿一-鿿]")
+_CJK_OR_RUN = re.compile(r"[㐀-䶿一-鿿]|[^㐀-䶿一-鿿]+")
 
 
 class BM25Hit(TypedDict):
@@ -24,8 +29,18 @@ class BM25Hit(TypedDict):
 
 
 def tokenize(text: str) -> list[str]:
-    """Tokenize ``text`` for BM25; jieba handles both CJK and space-delimited text."""
-    return list(jieba.cut(text))
+    """Lowercase word tokens; CJK ideographs become one token per character.
+
+    Character unigrams are a dependency-free stand-in for word segmentation
+    and work well enough for BM25 on CJK text.
+    """
+    tokens: list[str] = []
+    for word in _WORD.findall(text.lower()):
+        if _CJK.search(word):
+            tokens.extend(_CJK_OR_RUN.findall(word))
+        else:
+            tokens.append(word)
+    return tokens
 
 
 class BM25IndexManager:

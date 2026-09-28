@@ -28,6 +28,9 @@ restarts at 0.1.0.
 - `POST /api/upload` reports chunk counts from the ingestion report instead of
   parsing the demo UI's status text.
 - `example.env` is now `.env.example`; `config.py` no longer falls back to it.
+- BM25 tokenizes with a lowercase regex (CJK ideographs as character
+  unigrams) instead of jieba, dropping a 19 MB dictionary dependency and its
+  import-time cache build.
 - Comments, docstrings, log messages and LLM prompts in `core/`, `features/`
   and `utils/` are in English; the query-rewriting prompt now uses the
   `NO_FURTHER_QUERY` sentinel and web search defaults to English results.
