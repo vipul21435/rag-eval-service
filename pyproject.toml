@@ -17,7 +17,6 @@ dependencies = [
     "numpy>=1.26",
     "faiss-cpu>=1.8",
     "rank-bm25>=0.2.2",
-    "langchain-text-splitters>=0.3",
     "pdfminer.six>=20231228",
     "pydantic-settings>=2.7",
 ]
@@ -44,6 +43,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "httpx>=0.27",
+    "httpx2>=2.0",  # what starlette 1.x's TestClient prefers; httpx alone warns
     "ruff>=0.12",
     "mypy>=1.14",
     "types-requests>=2.31",
@@ -129,7 +129,6 @@ module = [
     "faiss",
     "faiss.*",
     "rank_bm25",
-    "langchain_text_splitters",
     "pdfminer.*",
     "docx",
     "pptx",

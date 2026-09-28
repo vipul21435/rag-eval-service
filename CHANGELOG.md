@@ -53,6 +53,12 @@ restarts at 0.1.0.
 
 ### Changed
 
+- Text splitting is an in-house recursive character splitter with the same
+  separators and merge rules; `langchain-text-splitters` is gone because
+  importing it loads sentence-transformers and torch whenever they are
+  installed, which made `make demo` and the tests take tens of seconds on
+  a cold start (measured: the demo took 102 s on a fresh clone with the
+  `neural` extra, 9 s without that import).
 - sentence-transformers and torch are the optional `neural` extra
   (`uv sync --extra neural`) instead of core dependencies; without it the
   hash embedder and `RAG_RERANK_METHOD=none` run the service with no model
