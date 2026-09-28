@@ -77,6 +77,28 @@ async def test_server_lists_the_four_tools_with_schemas(docs: Path):
     assert all(tool.description for tool in tools.values())
 
 
+async def test_tools_carry_read_only_and_destructive_annotations(docs: Path):
+    server = build_server(make_settings(mcp_document_root=docs))
+    async with in_process_session(server) as session:
+        listed = await session.list_tools()
+
+    hints = {
+        tool.name: (
+            tool.annotations.read_only_hint,
+            tool.annotations.destructive_hint,
+            tool.annotations.idempotent_hint,
+        )
+        for tool in listed.tools
+        if tool.annotations is not None
+    }
+    assert hints == {
+        "ingest_document": (False, True, True),
+        "search": (True, False, True),
+        "list_documents": (True, False, True),
+        "health": (True, False, True),
+    }
+
+
 async def test_ingest_then_search_and_list_over_the_session(docs: Path):
     server = build_server(make_settings(mcp_document_root=docs, rerank_method="none"))
     async with in_process_session(server) as session:

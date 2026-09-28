@@ -182,7 +182,11 @@ protocol messages.
 A path outside the document root, a missing file, an unsupported format, a
 file over `RAG_MAX_UPLOAD_MB`, an empty query or a search on an empty
 knowledge base returns an MCP tool error (`isError: true`) whose text
-names the problem, so an agent can correct its call. Client configuration
+names the problem, so an agent can correct its call. `search`,
+`list_documents` and `health` are annotated read-only and idempotent and
+`ingest_document` destructive (it replaces the knowledge base), so clients
+that gate approval on tool annotations can wave the reads through. Client
+configuration
 for Claude Desktop, Claude Code, Cursor or any stdio MCP client (adjust the
 path to your clone):
 

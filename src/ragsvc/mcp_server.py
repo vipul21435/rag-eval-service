@@ -26,6 +26,7 @@ from mcp import ClientSession
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.shared.memory import create_client_server_memory_streams
+from mcp.types import ToolAnnotations
 
 from ragsvc import __version__
 from ragsvc.api import health_snapshot
@@ -40,6 +41,14 @@ logger = logging.getLogger("ragsvc.mcp")
 
 SERVER_NAME = "recallmcp"
 MAX_TOP_K = 50
+# Clients that gate on annotations can auto-approve the read-only tools;
+# ingest_document replaces the knowledge base, so it is flagged destructive.
+READ_ONLY = ToolAnnotations(
+    read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
+REPLACES_INDEX = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False
+)
 INSTRUCTIONS = (
     "Local document retrieval. Call ingest_document with a path under the document root "
     "to (re)build the knowledge base from that file, then search for scored chunks. "
@@ -97,7 +106,10 @@ def build_server(settings: Settings | None = None) -> MCPServer[None]:
     active = settings
     server: MCPServer[None] = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS, version=__version__)
 
-    @server.tool(description="Index one document under the document root, replacing the knowledge base.")
+    @server.tool(
+        description="Index one document under the document root, replacing the knowledge base.",
+        annotations=REPLACES_INDEX,
+    )
     async def ingest_document(path: str) -> dict[str, Any]:
         target = resolve_document(path, active)
         report = await anyio.to_thread.run_sync(ingest_files, [SourceFile(path=target, name=target.name)])
@@ -112,7 +124,10 @@ def build_server(settings: Settings | None = None) -> MCPServer[None]:
             "total_chunks": report.total_chunks,
         }
 
-    @server.tool(description="The indexed chunks that best match the query, best first, with scores.")
+    @server.tool(
+        description="The indexed chunks that best match the query, best first, with scores.",
+        annotations=READ_ONLY,
+    )
     async def search(query: str, top_k: int | None = None) -> dict[str, Any]:
         if not query.strip():
             raise ToolError("query must not be empty")
@@ -133,12 +148,14 @@ def build_server(settings: Settings | None = None) -> MCPServer[None]:
         ]
         return {"query": query, "results": results}
 
-    @server.tool(description="The indexed documents with their chunk counts.")
+    @server.tool(description="The indexed documents with their chunk counts.", annotations=READ_ONLY)
     async def list_documents() -> dict[str, Any]:
         documents = indexed_documents()
         return {"documents": documents, "total_chunks": vector_store.total_chunks}
 
-    @server.tool(description="Version, provider names, index size and embedding cache counters.")
+    @server.tool(
+        description="Version, provider names, index size and embedding cache counters.", annotations=READ_ONLY
+    )
     async def health() -> dict[str, Any]:
         return health_snapshot(active).model_dump()
 
