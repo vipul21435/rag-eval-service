@@ -21,7 +21,8 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pyt
 ```
 
 Ruff (lint and format) and mypy (strict) run in CI; `uv run ruff format .`
-rewrites files in place.
+rewrites files in place. `uv run pre-commit install` runs the same checks on
+every commit.
 
 Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; run `uv lock` after changing them and commit both files.
 

@@ -111,6 +111,7 @@ uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check .   # lint and formatting
 uv run mypy                                          # strict type check
 uv run pytest                                        # tests
+uv run pre-commit install                            # run the checks on every commit
 ```
 
 Tests run without network access, model downloads or API keys. GitHub

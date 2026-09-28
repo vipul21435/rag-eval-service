@@ -14,6 +14,8 @@ restarts at 0.1.0.
   the PyTorch CPU index on Linux.
 - Ruff (lint + format) and strict mypy configuration in `pyproject.toml`;
   CI runs lint, formatting check, type check and tests.
+- `.pre-commit-config.yaml` running the same ruff and mypy checks plus
+  whitespace, YAML/TOML, large-file and private-key hooks.
 
 ### Changed
 
