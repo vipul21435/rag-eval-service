@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,13 @@ from core.vector_store import vector_store
 def fake_encode_texts(texts, show_progress=False):
     rng = np.random.default_rng(len(texts))
     return rng.random((len(texts), 8), dtype=np.float32)
+
+
+def unit_vectors(count: int, dimension: int = 8) -> np.ndarray:
+    vectors = np.zeros((count, dimension), dtype=np.float32)
+    for i in range(count):
+        vectors[i, i % dimension] = 1.0
+    return vectors
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +100,54 @@ def test_ingest_replaces_previous_indexes_and_reports_progress(tmp_path: Path):
     fractions = [fraction for fraction, _ in events]
     assert fractions == sorted(fractions)
     assert events[-1] == (1.0, "Done")
+
+
+def test_concurrent_ingests_are_serialized_and_leave_a_consistent_store(tmp_path: Path, monkeypatch):
+    first_encoding = threading.Event()
+    release_first = threading.Event()
+    encode_calls: list[int] = []
+
+    def blocking_encode(texts, show_progress=False):
+        encode_calls.append(len(texts))
+        if len(encode_calls) == 1:
+            first_encoding.set()
+            assert release_first.wait(5), "test did not release the first ingestion"
+        return unit_vectors(len(texts))
+
+    monkeypatch.setattr(ingest, "encode_texts", blocking_encode)
+    first_run = [SourceFile.from_path(write_text(tmp_path, "a.txt", "alpha"))]
+    second_run = [
+        SourceFile.from_path(write_text(tmp_path, f"b{i}.txt", f"bravo {word}"))
+        for i, word in enumerate(("one", "two", "three"))
+    ]
+    second_events: list[str] = []
+
+    first = threading.Thread(target=ingest_files, args=(first_run,))
+    first.start()
+    assert first_encoding.wait(5)
+    second = threading.Thread(
+        target=ingest_files, args=(second_run,), kwargs={"progress": lambda _f, d: second_events.append(d)}
+    )
+    second.start()
+    second.join(0.2)
+
+    # The second run must not have touched the indexes while the first is mid-flight.
+    assert second.is_alive()
+    assert second_events == []
+
+    release_first.set()
+    first.join(5)
+    second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+
+    assert encode_calls == [1, 3]
+    assert list(vector_store.id_order) == ["doc_1_chunk_0", "doc_2_chunk_0", "doc_3_chunk_0"]
+    assert vector_store.total_chunks == 3
+    for position, chunk_id in enumerate(vector_store.id_order):
+        docs, ids, _ = vector_store.search(unit_vectors(3)[position : position + 1], k=1)
+        assert ids == [chunk_id]
+        assert docs == [vector_store.contents_map[chunk_id]]
+    assert bm25_manager.search("bravo three", top_k=1)[0]["id"] == "doc_3_chunk_0"
 
 
 def test_ingest_with_no_sources_leaves_empty_indexes():

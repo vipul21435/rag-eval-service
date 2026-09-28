@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import TypedDict
 
 import numpy as np
@@ -43,30 +44,48 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
+@dataclass(frozen=True)
+class _Snapshot:
+    """One BM25 index and the corpus it scores, installed with one assignment."""
+
+    index: BM25Okapi
+    doc_ids: tuple[str, ...]
+    corpus: tuple[str, ...]
+
+
 class BM25IndexManager:
     """Build, search and clear a BM25 index over chunk texts."""
 
     def __init__(self) -> None:
-        self.bm25_index: BM25Okapi | None = None
-        self.doc_mapping: dict[int, str] = {}
-        self.tokenized_corpus: list[list[str]] = []
-        self.raw_corpus: list[str] = []
+        self._snapshot: _Snapshot | None = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self._snapshot is not None
+
+    @property
+    def bm25_index(self) -> BM25Okapi | None:
+        snapshot = self._snapshot
+        return snapshot.index if snapshot is not None else None
 
     def build_index(self, documents: list[str], doc_ids: list[str]) -> bool:
-        """Index ``documents``; ``doc_ids`` are returned by ``search``."""
-        self.raw_corpus = list(documents)
-        self.doc_mapping = dict(enumerate(doc_ids))
-        self.tokenized_corpus = [tokenize(doc) for doc in documents]
-        self.bm25_index = BM25Okapi(self.tokenized_corpus)
+        """Replace the index with one over ``documents``; ``doc_ids`` are returned by ``search``."""
+        if len(documents) != len(doc_ids):
+            raise ValueError(f"{len(documents)} documents but {len(doc_ids)} ids")
+        index = BM25Okapi([tokenize(doc) for doc in documents])
+        # A single reference assignment: a concurrent search sees either the
+        # previous corpus or the new one, never a mix.
+        self._snapshot = _Snapshot(index=index, doc_ids=tuple(doc_ids), corpus=tuple(documents))
         logger.info("BM25 index built over %d documents", len(documents))
         return True
 
     def search(self, query: str, top_k: int = 5) -> list[BM25Hit]:
         """Return up to ``top_k`` documents with a positive BM25 score, best first."""
-        if self.bm25_index is None:
+        snapshot = self._snapshot
+        if snapshot is None:
             return []
 
-        scores = self.bm25_index.get_scores(tokenize(query))
+        scores = snapshot.index.get_scores(tokenize(query))
         top_indices = np.argsort(scores)[-top_k:][::-1]
 
         results: list[BM25Hit] = []
@@ -74,18 +93,15 @@ class BM25IndexManager:
             if scores[idx] > 0:
                 results.append(
                     {
-                        "id": self.doc_mapping[int(idx)],
+                        "id": snapshot.doc_ids[int(idx)],
                         "score": float(scores[idx]),
-                        "content": self.raw_corpus[idx],
+                        "content": snapshot.corpus[int(idx)],
                     }
                 )
         return results
 
     def clear(self) -> None:
-        self.bm25_index = None
-        self.doc_mapping = {}
-        self.tokenized_corpus = []
-        self.raw_corpus = []
+        self._snapshot = None
 
 
 # Module-level singleton shared by the retriever and the ingestion pipeline.

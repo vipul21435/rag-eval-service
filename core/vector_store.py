@@ -12,6 +12,8 @@ FAISS index types trade accuracy for speed:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -98,14 +100,47 @@ class AutoFaissIndex:
         }
 
 
+@dataclass(frozen=True)
+class _Snapshot:
+    """One built index and the chunk data it points at.
+
+    A snapshot is assembled off to the side and then installed with a single
+    reference assignment, so a concurrent search sees either the previous
+    knowledge base or the new one, never a mix of the two.
+    """
+
+    index: AutoFaissIndex
+    id_order: tuple[str, ...]
+    contents: dict[str, str]
+    metadatas: dict[str, Metadata]
+
+
 class VectorStore:
     """FAISS index plus the chunk texts and metadata it points at."""
 
     def __init__(self) -> None:
-        self.index: AutoFaissIndex | None = None
-        self.contents_map: dict[str, str] = {}
-        self.metadatas_map: dict[str, Metadata] = {}
-        self.id_order: list[str] = []
+        self._snapshot: _Snapshot | None = None
+
+    @property
+    def index(self) -> AutoFaissIndex | None:
+        snapshot = self._snapshot
+        return snapshot.index if snapshot is not None else None
+
+    @property
+    def id_order(self) -> Sequence[str]:
+        """Chunk ids in FAISS position order."""
+        snapshot = self._snapshot
+        return snapshot.id_order if snapshot is not None else ()
+
+    @property
+    def contents_map(self) -> Mapping[str, str]:
+        snapshot = self._snapshot
+        return snapshot.contents if snapshot is not None else {}
+
+    @property
+    def metadatas_map(self) -> Mapping[str, Metadata]:
+        snapshot = self._snapshot
+        return snapshot.metadatas if snapshot is not None else {}
 
     def build_index(
         self,
@@ -114,33 +149,36 @@ class VectorStore:
         metadatas: list[Metadata],
         embeddings: NDArray[np.float32],
     ) -> None:
-        """Build a fresh FAISS index over ``embeddings`` and record the chunk texts.
+        """Replace the store's contents with a fresh index over ``embeddings``.
 
         Positions in ``chunks``, ``chunk_ids``, ``metadatas`` and ``embeddings``
         must correspond; ``chunk_ids`` are the stable identifiers returned by
-        ``search``.
+        ``search`` and must be unique. Nothing from a previous build is kept.
         """
-        dimension = int(embeddings.shape[1])
-        num_vectors = len(chunks)
+        if len(set(chunk_ids)) != len(chunk_ids):
+            raise ValueError("chunk_ids must be unique")
+        if int(embeddings.shape[0]) != len(chunks):
+            raise ValueError(f"{len(chunks)} chunks but {int(embeddings.shape[0])} embeddings")
 
-        auto_index = AutoFaissIndex(dimension=dimension)
-        auto_index.select_index_type(num_vectors)
-
-        for chunk_id, chunk, meta in zip(chunk_ids, chunks, metadatas, strict=True):
-            self.contents_map[chunk_id] = chunk
-            self.metadatas_map[chunk_id] = meta
-            self.id_order.append(chunk_id)
-
+        auto_index = AutoFaissIndex(dimension=int(embeddings.shape[1]))
+        auto_index.select_index_type(len(chunks))
         auto_index.add(embeddings)
-        self.index = auto_index
+
+        self._snapshot = _Snapshot(
+            index=auto_index,
+            id_order=tuple(chunk_ids),
+            contents=dict(zip(chunk_ids, chunks, strict=True)),
+            metadatas=dict(zip(chunk_ids, metadatas, strict=True)),
+        )
         logger.info("FAISS index built: %d chunks, type %s", auto_index.ntotal, auto_index.index_type)
 
     def search(self, query_embedding: NDArray[np.float32], k: int = 10) -> SearchResult:
         """Return the ``k`` nearest chunks as ``(texts, chunk_ids, metadatas)``."""
-        if self.index is None or self.index.ntotal == 0:
+        snapshot = self._snapshot
+        if snapshot is None or snapshot.index.ntotal == 0:
             return [], [], []
         try:
-            _, indices = self.index.search(query_embedding, k=k)
+            _, indices = snapshot.index.search(query_embedding, k=k)
         except Exception as exc:  # noqa: BLE001 - FAISS raises plain RuntimeError
             logger.error("FAISS search failed: %s", exc)
             return [], [], []
@@ -149,28 +187,25 @@ class VectorStore:
         doc_ids: list[str] = []
         metadatas: list[Metadata] = []
         for faiss_idx in indices[0]:
-            if faiss_idx == -1 or faiss_idx >= len(self.id_order):
+            if faiss_idx == -1 or faiss_idx >= len(snapshot.id_order):
                 continue
-            chunk_id = self.id_order[faiss_idx]
-            if chunk_id in self.contents_map:
-                docs.append(self.contents_map[chunk_id])
-                doc_ids.append(chunk_id)
-                metadatas.append(self.metadatas_map.get(chunk_id, {}))
+            chunk_id = snapshot.id_order[faiss_idx]
+            docs.append(snapshot.contents[chunk_id])
+            doc_ids.append(chunk_id)
+            metadatas.append(snapshot.metadatas[chunk_id])
         return docs, doc_ids, metadatas
 
     @property
     def is_ready(self) -> bool:
-        return self.index is not None and self.index.ntotal > 0
+        return self.total_chunks > 0
 
     @property
     def total_chunks(self) -> int:
-        return self.index.ntotal if self.index is not None else 0
+        snapshot = self._snapshot
+        return snapshot.index.ntotal if snapshot is not None else 0
 
     def clear(self) -> None:
-        self.index = None
-        self.contents_map.clear()
-        self.metadatas_map.clear()
-        self.id_order.clear()
+        self._snapshot = None
         logger.info("Vector store cleared")
 
 

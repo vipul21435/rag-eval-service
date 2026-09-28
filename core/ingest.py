@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 # Callback invoked with (fraction_complete, description).
 ProgressCallback = Callable[[float, str], object]
+
+# Ingestion runs replace the whole knowledge base, so two of them must not
+# interleave: the API runs uploads in worker threads, and without this lock
+# both could clear the indexes and then each build on top of the other's work.
+_INGEST_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -77,8 +83,14 @@ def ingest_files(
 
     The existing indexes are cleared first: an ingestion run replaces the
     whole knowledge base rather than appending to it. Files that fail to
-    parse are reported individually and do not abort the run.
+    parse are reported individually and do not abort the run. Runs are
+    serialized process-wide; a concurrent call waits for the current one.
     """
+    with _INGEST_LOCK:
+        return _ingest_files_locked(sources, progress)
+
+
+def _ingest_files_locked(sources: Sequence[SourceFile], progress: ProgressCallback | None) -> IngestReport:
     _notify(progress, 0.0, "Clearing existing indexes")
     vector_store.clear()
     bm25_manager.clear()

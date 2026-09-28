@@ -55,6 +55,13 @@ restarts at 0.1.0.
   was lost and every remaining retrieval round searched for `""`. Reasoning
   blocks are now removed wherever they appear, and an empty rewrite ends the
   loop.
+- Two uploads running at the same time corrupted the dense index:
+  `VectorStore.build_index` appended to the live id list while replacing the
+  FAISS index, so positions mapped to the wrong chunks, and nothing stopped
+  both runs from clearing and rebuilding over each other. Ingestion runs are
+  now serialized by a lock, and both the FAISS and BM25 stores build a fresh
+  snapshot and install it with a single assignment, so a concurrent
+  `/api/ask` sees either the old knowledge base or the new one.
 - The default reranker model was a bi-encoder
   (`distiluse-base-multilingual-cased-v2`) loaded as a cross-encoder, which
   scores with an untrained head; the default is now

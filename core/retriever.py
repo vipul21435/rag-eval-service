@@ -176,7 +176,7 @@ def recursive_retrieval(
         sem_docs, sem_ids, sem_metas = vector_store.search(query_embedding, k=RETRIEVAL_TOP_K)
         semantic = {"ids": [sem_ids], "documents": [sem_docs], "metadatas": [sem_metas]}
 
-        bm25_res = bm25_manager.search(query, top_k=RETRIEVAL_TOP_K) if bm25_manager.bm25_index else []
+        bm25_res = bm25_manager.search(query, top_k=RETRIEVAL_TOP_K)
 
         hybrid = hybrid_merge(semantic, bm25_res)
         ids_iter = [doc_id for doc_id, _ in hybrid[:RETRIEVAL_TOP_K]]

@@ -67,7 +67,7 @@ def test_recursive_retrieval_returns_web_results_with_source_metadata(monkeypatc
             [{"source": "local.pdf"}],
         ),
     )
-    monkeypatch.setattr(bm25_manager, "bm25_index", None)
+    bm25_manager.clear()
     monkeypatch.setattr(
         retriever,
         "rerank_results",
@@ -143,7 +143,7 @@ def test_recursive_retrieval_deduplicates_web_results_across_iterations(monkeypa
         "search",
         lambda query_embedding, k: ([], [], []),
     )
-    monkeypatch.setattr(bm25_manager, "bm25_index", None)
+    bm25_manager.clear()
     monkeypatch.setattr(
         "core.generator.call_llm_simple",
         lambda prompt, provider: "refined retrieval query",
@@ -177,7 +177,7 @@ def local_only_retrieval(monkeypatch):
         "search",
         lambda query_embedding, k: (["BM25 ranks by term frequency."], ["doc-1"], [{}]),
     )
-    monkeypatch.setattr(bm25_manager, "bm25_index", None)
+    bm25_manager.clear()
     monkeypatch.setattr(
         retriever,
         "rerank_results",

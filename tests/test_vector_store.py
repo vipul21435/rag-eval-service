@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from core.vector_store import AutoFaissIndex, VectorStore
 
@@ -49,6 +50,35 @@ def test_search_drops_padding_indices_when_k_exceeds_size():
     assert metas == [{}, {}]
 
 
+def test_rebuild_replaces_previous_ids_so_positions_map_to_the_right_chunks():
+    store = VectorStore()
+    store.build_index(["alpha"], ["doc_1_chunk_0"], [{"source": "a.txt"}], unit_vectors(1))
+
+    second = unit_vectors(3)
+    store.build_index(
+        ["bravo one", "bravo two", "bravo three"],
+        ["doc_1_chunk_0", "doc_1_chunk_1", "doc_1_chunk_2"],
+        [{"source": "b.txt"}] * 3,
+        second,
+    )
+
+    assert list(store.id_order) == ["doc_1_chunk_0", "doc_1_chunk_1", "doc_1_chunk_2"]
+    assert store.total_chunks == len(store.id_order)
+    for position, expected in enumerate(["bravo one", "bravo two", "bravo three"]):
+        docs, ids, _ = store.search(second[position : position + 1], k=1)
+        assert (docs, ids) == ([expected], [f"doc_1_chunk_{position}"])
+
+
+def test_build_index_rejects_duplicate_ids_and_mismatched_embeddings():
+    store = VectorStore()
+
+    with pytest.raises(ValueError, match="unique"):
+        store.build_index(["one", "two"], ["c0", "c0"], [{}, {}], unit_vectors(2))
+    with pytest.raises(ValueError, match="embeddings"):
+        store.build_index(["one", "two"], ["c0", "c1"], [{}, {}], unit_vectors(3))
+    assert not store.is_ready
+
+
 def test_clear_resets_state():
     store = VectorStore()
     store.build_index(["one"], ["c0"], [{"source": "x"}], unit_vectors(1))
@@ -59,7 +89,7 @@ def test_clear_resets_state():
     assert store.total_chunks == 0
     assert store.contents_map == {}
     assert store.metadatas_map == {}
-    assert store.id_order == []
+    assert list(store.id_order) == []
 
 
 def test_auto_index_selects_flat_index_for_small_datasets():
