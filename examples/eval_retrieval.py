@@ -1,7 +1,9 @@
 """Offline retrieval evaluation: ingest the sample documents, score the golden set, write reports.
 
 Pins the hash embedder and no reranker like ``examples/demo.py`` so it runs
-with no network, then evaluates ``examples/eval/golden.v1.jsonl`` in
+with no network, and pins the chunking and retrieval hyperparameters to
+their defaults so a ``.env`` file or ``RAG_*`` variables in the shell cannot
+change the benchmark numbers. It then evaluates ``examples/eval/golden.v1.jsonl`` in
 dense-only and hybrid mode, writes ``retrieval-eval.json`` and
 ``retrieval-eval.md`` into ``--output-dir`` (default ``eval-reports/``) and
 exits 1 when a mean drops below ``examples/eval/thresholds.toml``.
@@ -26,12 +28,16 @@ THRESHOLDS_PATH = EXAMPLES_DIR / "eval" / "thresholds.toml"
 
 
 def eval_settings() -> Settings:
-    """Offline settings: hash embedder, no reranker, no LLM probe, no cache file."""
+    """Offline settings: hash embedder, no reranker, no LLM probe, no cache file, default retrieval knobs."""
     return Settings(
         embedding_provider="hash",
         rerank_method="none",
         llm_provider="ollama",
         embedding_cache_enabled=False,
+        chunk_size=400,
+        chunk_overlap=40,
+        hybrid_alpha=0.7,
+        retrieval_top_k=10,
         log_level="WARNING",
         log_format="text",
     )

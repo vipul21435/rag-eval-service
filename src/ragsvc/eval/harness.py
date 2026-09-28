@@ -132,6 +132,7 @@ class EvalReport:
     golden_set: str
     embedding_provider: str
     hybrid_alpha: float
+    retrieval_top_k: int
     k: int
     modes: list[ModeReport]
 
@@ -161,7 +162,8 @@ class EvalReport:
         header = [
             f"# Retrieval evaluation: {self.golden_set}",
             "",
-            f"Embedder: `{self.embedding_provider}`, hybrid alpha: {self.hybrid_alpha}, k: {self.k}.",
+            f"Embedder: `{self.embedding_provider}`, hybrid alpha: {self.hybrid_alpha}, "
+            f"candidates per retriever: {self.retrieval_top_k}, k: {self.k}.",
             "",
             f"| Mode | Recall@{self.k} | MRR | nDCG@{self.k} |",
             "| --- | --- | --- | --- |",
@@ -197,6 +199,7 @@ def evaluate(golden: Sequence[GoldenQuery], k: int, golden_set: str = "golden") 
         golden_set=golden_set,
         embedding_provider=settings.embedding_provider,
         hybrid_alpha=settings.hybrid_alpha,
+        retrieval_top_k=top_k,
         k=k,
         modes=modes,
     )

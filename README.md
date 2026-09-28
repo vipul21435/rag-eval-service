@@ -356,7 +356,7 @@ per-query table is in the file):
 ```text
 # Retrieval evaluation: golden.v1.jsonl
 
-Embedder: `hash`, hybrid alpha: 0.7, k: 3.
+Embedder: `hash`, hybrid alpha: 0.7, candidates per retriever: 10, k: 3.
 
 | Mode | Recall@3 | MRR | nDCG@3 |
 | --- | --- | --- | --- |
@@ -372,6 +372,18 @@ document(s) it should be answered from, and the ranked chunks are collapsed
 to their source documents in rank order before scoring. With three
 documents and ten candidates per retriever, recall@3 is saturated; MRR and
 nDCG@3 are the numbers that separate the two modes.
+
+The script pins the chunking and retrieval settings (`RAG_CHUNK_SIZE=400`,
+`RAG_CHUNK_OVERLAP=40`, `RAG_HYBRID_ALPHA=0.7`, `RAG_RETRIEVAL_TOP_K=10`)
+as well as the embedder, so a `.env` file or exported `RAG_*` variables do
+not move the numbers; the report records the values it ran with. The
+comparison is sensitive to the candidate count: with more candidates than
+the corpus has chunks (`retrieval_top_k=30` over 22 chunks, or a
+thresholds `k` above 22, since the script uses `max(retrieval_top_k, k)`)
+the hybrid merge normalises over the padded pool and hybrid MRR falls to
+0.875, below dense-only. The gate therefore holds at the pinned ten
+candidates, and the merge's normalisation over short corpora is on the
+list below.
 
 ## Benchmarks
 
@@ -599,8 +611,9 @@ running container.
   processes.
 - Hosted model and web-search providers send the query to third parties;
   review your data boundary before enabling them.
-- There is no retrieval quality evaluation yet; the numbers above are
-  latency only.
+- The retrieval evaluation is document-level over three bundled documents
+  with the hash embedder; it catches regressions in the retrievers and the
+  merge, not embedder quality.
 
 ## What I would do next
 
@@ -611,8 +624,9 @@ running container.
 - Ingestion improvements: pluggable chunkers (sentence and Markdown-aware),
   MinHash near-duplicate detection across documents and a collision ledger
   for the embedding cache.
-- Reciprocal rank fusion as an alternative to the weighted hybrid merge,
-  and a query cache in front of `search_chunks`.
+- Reciprocal rank fusion as an alternative to the weighted hybrid merge
+  (its min-max normalisation degrades when the candidate list is longer
+  than the corpus), and a query cache in front of `search_chunks`.
 - Agent tasks with pytest graders that score an agent's answers against
   the golden set.
 - A Typer CLI (`recallmcp ingest`, `recallmcp search`, `recallmcp serve`)
