@@ -132,7 +132,7 @@ itself. Five commands from a fresh clone:
 git clone https://github.com/vipul21435/recallmcp.git && cd recallmcp
 make install        # uv sync: locked dependencies, all extras and the dev tools
 make demo           # offline: hash embedder, 3 sample documents, 3 timed queries
-make test           # 184 tests with coverage; no network, models or credentials
+make test           # 227 tests with coverage; no network, models or credentials
 uv run recallmcp    # serve the API on http://127.0.0.1:17995
 uv run recallmcp-mcp   # serve the same knowledge base as MCP tools on stdio
 ```
@@ -410,7 +410,7 @@ and easy on purpose: it exists to catch regressions, not to rank embedders.
 | Whole demo, wall clock | `time make demo` | 0.5 s with a warm virtualenv (interpreter start-up and imports are most of it) |
 | MCP tool call, in-process client session | `uv run python examples/mcp_latency.py` | `search` p50 0.48 ms, p95 0.75 ms over 50 calls; `list_documents` p50 0.33 ms; `health` p50 0.37 ms; `ingest_document` of an 8-chunk file 36 ms |
 | MCP tool call over stdio to a child process | `uv run python examples/mcp_latency.py` | `search` p50 0.88 ms, p95 1.02 ms over 20 calls; `health` p50 0.73 ms; spawn plus `initialize` 666 ms; the whole script 1.9 s |
-| Test suite | `uv run pytest --cov=ragsvc` | 216 tests in 5.4 s (three run the demo or the eval script in a subprocess), 88% line coverage |
+| Test suite | `uv run pytest --cov=ragsvc` | 227 tests in 6.7 s (seven run the demo, the eval script or a fresh interpreter in a subprocess), 88% line coverage |
 | Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 1.8 s (warm uv cache, 1.0 GB virtualenv), 3.2 s for the first `make demo` (uv builds the project; 0.4 s on the second run), 4.3 s |
 | Container image | `docker build -t recallmcp:dev .` | 96 MB compressed content (`docker image inspect --format '{{.Size}}'` reports about 96.1 million bytes, 3 MB of it the `mcp` package), 419 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
 
@@ -583,7 +583,7 @@ examples/
   eval_retrieval.py        `make eval`
   eval/                    golden.v1.jsonl (12 labelled queries) and thresholds.toml
   docs/                    Three sample Markdown documents
-tests/                     216 tests that need no network access or credentials
+tests/                     227 tests that need no network access or credentials
 Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 ```
 
