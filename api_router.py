@@ -67,6 +67,7 @@ class QuestionRequest(BaseModel):
 
 class AnswerResponse(BaseModel):
     answer: str
+    reasoning: str | None = Field(default=None, description="Reasoning emitted by thinking models, if any")
     sources: list[dict[str, Any]]
     metadata: dict[str, Any]
 
@@ -123,6 +124,7 @@ async def ask_question(req: QuestionRequest) -> dict[str, Any]:
 
     return {
         "answer": answer.text,
+        "reasoning": answer.reasoning,
         "sources": answer.sources,
         "metadata": {
             "enable_web_search": req.enable_web_search,

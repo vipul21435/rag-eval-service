@@ -60,7 +60,9 @@ The API listens on the first free port in `17995-17999`. Main endpoints:
   XLS/XLSX with the `documents` extra) and rebuild the indexes from it;
 - `POST /api/ask`: ask a question against the indexed documents
   (`{"question": "...", "provider": "ollama" | "openai" | null}`); answers
-  carry the source documents and whether the sources disagree.
+  are plain text and carry the source documents, whether the sources
+  disagree, and the reasoning of thinking models (`<think>` blocks) as a
+  separate `reasoning` field.
 
 Embedding and reranking models are downloaded from the Hugging Face Hub on
 first use and cached locally. Answer generation needs an LLM: a local
@@ -99,7 +101,7 @@ core/
   reranker.py              Result reranking
   generator.py             Context building and answer generation
   ingest.py                Ingestion pipeline shared by all entry points
-features/                  Web search, conflict detection, thinking-chain formatting
+features/                  Web search, conflict detection, reasoning-block splitting
 utils/                     HTTP session and port helpers
 tests/                     Tests that need no network access or credentials
 ```

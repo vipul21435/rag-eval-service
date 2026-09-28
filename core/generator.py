@@ -25,7 +25,7 @@ from config import (
 from core.retriever import recursive_retrieval
 from core.vector_store import Metadata, vector_store
 from features.conflict_detector import detect_conflicts
-from features.thinking_chain import process_thinking_content
+from features.thinking_chain import split_thinking
 from utils.network import get_session
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,8 @@ class Answer:
     sources: list[Source] = field(default_factory=list)
     conflict_detected: bool = False
     provider: str = ""
+    # Reasoning emitted by thinking models inside <think> tags; None otherwise.
+    reasoning: str | None = None
 
 
 # --- OpenAI-compatible provider --------------------------------------------
@@ -291,11 +293,13 @@ def answer_question(question: str, enable_web_search: bool = False, provider: Pr
     )
 
     raw = call_llm(prompt, provider, temperature=0.7, max_tokens=1536)
+    split = split_thinking(raw)
     return Answer(
-        text=process_thinking_content(raw),
+        text=split.answer,
         sources=[{key: value for key, value in source.items() if key != "text"} for source in sources],
         conflict_detected=conflict_detected,
         provider=provider,
+        reasoning=split.reasoning,
     )
 
 

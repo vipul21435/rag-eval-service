@@ -91,8 +91,8 @@ def test_answer_question_builds_prompt_from_retrieved_context(monkeypatch):
         vector_store.clear()
 
     assert isinstance(answer, Answer)
-    assert answer.text.startswith("Revenue grew 12%.")
-    assert "<details>" in answer.text
+    assert answer.text == "Revenue grew 12%."
+    assert answer.reasoning == "checked the report"
     assert answer.sources == [{"type": "local", "source": "report.pdf"}]
     assert answer.conflict_detected is False
     assert answer.provider == "openai"

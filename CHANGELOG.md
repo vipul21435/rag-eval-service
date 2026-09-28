@@ -31,6 +31,12 @@ restarts at 0.1.0.
   `502` instead of returning error text as the answer.
 - `POST /api/upload` reports chunk counts from the ingestion report instead of
   parsing the demo UI's status text.
+- `POST /api/ask` returns the answer as plain text and the `<think>` output of
+  reasoning models as a separate `reasoning` field. Upstream rendered the
+  reasoning as an HTML `<details>` block for the Gradio UI and HTML-escaped
+  the rest of the answer, which corrupted text such as `x < 10` in the API
+  and let model output starting with `<details` or `<summary` (attributes
+  included) through unescaped.
 - `example.env` is now `.env.example`; `config.py` no longer falls back to it.
 - BM25 tokenizes with a lowercase regex (CJK ideographs as character
   unigrams) instead of jieba, dropping a 19 MB dictionary dependency and its

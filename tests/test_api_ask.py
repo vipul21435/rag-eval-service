@@ -21,6 +21,7 @@ def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):
             sources=[{"type": "local", "source": "notes.md"}],
             conflict_detected=False,
             provider=provider,
+            reasoning="Both retrievers contribute a normalized score.",
         )
 
     monkeypatch.setattr(api_router, "answer_question", fake_answer)
@@ -30,6 +31,7 @@ def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "answer": "Hybrid retrieval merges dense and sparse scores.",
+        "reasoning": "Both retrievers contribute a normalized score.",
         "sources": [{"type": "local", "source": "notes.md"}],
         "metadata": {"enable_web_search": False, "provider": "openai", "conflict_detected": False},
     }

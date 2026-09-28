@@ -1,75 +1,62 @@
-"""Thinking-chain formatting for reasoning models.
+"""Thinking-chain handling for reasoning models.
 
-Models such as DeepSeek-R1 wrap their reasoning in ``<think>...</think>``.
-This module turns each such block into a collapsible HTML ``<details>``
-element and escapes every other angle bracket so model output cannot inject
-markup.
+Models such as DeepSeek-R1 and Qwen3 wrap their reasoning in
+``<think>...</think>``. The service is API-only, so the reasoning is not
+rendered: it is separated from the answer and returned as its own field,
+leaving any HTML rendering (and escaping) to the client.
 """
 
 from __future__ import annotations
 
-import logging
+import re
+from dataclasses import dataclass
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
-_KEPT_TAG_PREFIXES = ("<details", "</details", "<summary", "</summary")
+_THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 
 
-def process_thinking_content(text: Any) -> str:
-    """Render ``<think>`` blocks as ``<details>`` and escape all other tags."""
+@dataclass(frozen=True)
+class ThinkingSplit:
+    """A model response split into its visible answer and its reasoning."""
+
+    answer: str
+    reasoning: str | None = None
+
+
+def split_thinking(text: Any) -> ThinkingSplit:
+    """Separate ``<think>`` blocks from the rest of a model response.
+
+    Every ``<think>...</think>`` span, wherever it appears, is removed from the
+    answer and collected as reasoning. Two truncated shapes are handled as
+    well: a ``<think>`` that is never closed (the model hit its token limit
+    mid-reasoning) takes the rest of the text as reasoning, and a ``</think>``
+    with no opening tag (chat templates that pre-fill ``<think>``) takes the
+    text before it. Both parts are stripped of surrounding whitespace.
+    """
     if text is None:
+        return ThinkingSplit(answer="")
+    processed = text if isinstance(text, str) else str(text)
+
+    reasoning_parts: list[str] = []
+
+    first_close = processed.find(_THINK_CLOSE)
+    first_open = processed.find(_THINK_OPEN)
+    if first_close != -1 and (first_open == -1 or first_close < first_open):
+        reasoning_parts.append(processed[:first_close])
+        processed = processed[first_close + len(_THINK_CLOSE) :]
+
+    def collect(match: re.Match[str]) -> str:
+        reasoning_parts.append(match.group(1))
         return ""
-    if not isinstance(text, str):
-        try:
-            processed = str(text)
-        except Exception:  # noqa: BLE001 - defensive: __str__ of arbitrary objects
-            return "Unprocessable content"
-    else:
-        processed = text
 
-    try:
-        while _THINK_OPEN in processed and _THINK_CLOSE in processed:
-            start = processed.find(_THINK_OPEN)
-            end = processed.find(_THINK_CLOSE)
-            if end <= start:
-                break
-            reasoning = processed[start + len(_THINK_OPEN) : end]
-            processed = (
-                processed[:start]
-                + "\n\n<details>\n<summary>Reasoning (click to expand)</summary>\n\n"
-                + reasoning
-                + "\n\n</details>\n\n"
-                + processed[end + len(_THINK_CLOSE) :]
-            )
-        return _escape_except_details(processed)
-    except Exception as exc:  # noqa: BLE001 - never let formatting take the answer down
-        logger.error("Failed to format thinking content: %s", exc)
-        try:
-            return str(text).replace("<", "&lt;").replace(">", "&gt;")
-        except Exception:  # noqa: BLE001
-            return "Failed to format content"
+    processed = _THINK_BLOCK.sub(collect, processed)
 
+    unclosed = processed.find(_THINK_OPEN)
+    if unclosed != -1:
+        reasoning_parts.append(processed[unclosed + len(_THINK_OPEN) :])
+        processed = processed[:unclosed]
 
-def _escape_except_details(text: str) -> str:
-    """HTML-escape angle brackets, keeping ``<details>`` and ``<summary>`` tags intact."""
-    out: list[str] = []
-    i = 0
-    while i < len(text):
-        if text.startswith(_KEPT_TAG_PREFIXES, i):
-            tag_end = text.find(">", i)
-            if tag_end != -1:
-                out.append(text[i : tag_end + 1])
-                i = tag_end + 1
-                continue
-        char = text[i]
-        if char == "<":
-            out.append("&lt;")
-        elif char == ">":
-            out.append("&gt;")
-        else:
-            out.append(char)
-        i += 1
-    return "".join(out)
+    reasoning = "\n\n".join(part.strip() for part in reasoning_parts if part.strip())
+    return ThinkingSplit(answer=processed.strip(), reasoning=reasoning or None)
