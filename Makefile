@@ -1,7 +1,5 @@
 # Developer entry points. Everything runs through uv; `make install` first.
 UV ?= uv
-RAG_EMBEDDING_PROVIDER ?= hash
-export RAG_EMBEDDING_PROVIDER
 
 .PHONY: install lint format typecheck test demo ci docker-build docker-up
 
@@ -22,7 +20,7 @@ typecheck:  ## Strict mypy over src, tests and examples
 test:  ## Test suite with coverage; needs no network, models or credentials
 	$(UV) run pytest --cov=ragsvc --cov-report=term-missing
 
-demo:  ## Ingest the sample documents and run three queries with the hash embedder (offline)
+demo:  ## Ingest the sample documents and run three queries; the script pins the hash embedder (offline)
 	$(UV) run python examples/demo.py
 
 ci: lint typecheck test  ## What GitHub Actions runs

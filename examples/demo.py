@@ -1,11 +1,13 @@
 """Offline demo: ingest the sample documents, then run three queries and time them.
 
-Runs with the deterministic hash embedder and no reranker, so it needs no
-network access, no model download and no LLM. It prints the ingestion
-time, the embedding cache counters before and after a re-index, the top
-chunks of each query with their hybrid scores, and per-query latency
-percentiles. ``make demo`` runs it; ``RAG_EMBEDDING_PROVIDER`` and the
-other ``RAG_`` settings are honoured except the ones the demo pins.
+The demo pins the deterministic hash embedder, no reranker and the Ollama
+LLM provider (which is never called), so it needs no network access, no
+model download and no LLM whether it is started with ``make demo`` or with
+``uv run python examples/demo.py``; ``RAG_EMBEDDING_PROVIDER`` and
+``RAG_RERANK_METHOD`` in the environment are ignored, the other ``RAG_``
+settings are honoured. It prints the ingestion time, the embedding cache
+counters before and after a re-index, the top chunks of each query with
+their hybrid scores, and per-query latency percentiles.
 """
 
 from __future__ import annotations
@@ -54,17 +56,27 @@ def timed_ingest(sources: list[SourceFile]) -> tuple[float, int, list[tuple[str,
     return elapsed, report.total_chunks, [(result.name, result.chunks) for result in report.files]
 
 
+def demo_settings(cache_path: Path) -> Settings:
+    """Settings that keep the demo offline regardless of the environment.
+
+    Explicit arguments win over ``RAG_*`` variables and ``.env``, so the
+    embedder and reranker below cannot be overridden into a model download.
+    """
+    return Settings(
+        embedding_provider="hash",  # deterministic, no model download
+        rerank_method="none",  # the cross-encoder would need a model download
+        llm_provider="ollama",  # never probe for a server: the demo does not generate
+        max_retrieval_iterations=1,
+        embedding_cache_enabled=True,
+        embedding_cache_path=cache_path,
+        log_level="WARNING",
+        log_format="text",
+    )
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="recallmcp-demo-") as tmp:
-        settings = Settings(
-            llm_provider="ollama",  # never probe for a server: the demo does not generate
-            rerank_method="none",  # the cross-encoder would need a model download
-            max_retrieval_iterations=1,
-            embedding_cache_enabled=True,
-            embedding_cache_path=Path(tmp) / "embeddings.sqlite3",
-            log_level="WARNING",
-            log_format="text",
-        )
+        settings = demo_settings(Path(tmp) / "embeddings.sqlite3")
         configure_logging(settings.log_level, settings.log_format)
         client = TestClient(create_app(settings))
 

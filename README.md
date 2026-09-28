@@ -116,8 +116,10 @@ uv run recallmcp    # serve the API on http://127.0.0.1:17995
 `make install` includes the `neural` extra (sentence-transformers and
 torch: the virtualenv measures 1.1 GB with it and 313 MB without). To
 stay lean run `uv sync --locked --extra documents --dev` instead and serve
-with `RAG_EMBEDDING_PROVIDER=hash RAG_RERANK_METHOD=none`; the demo and
-the tests do that on their own.
+with `RAG_EMBEDDING_PROVIDER=hash RAG_RERANK_METHOD=none`. The demo pins
+those two settings in `examples/demo.py` and the tests build their own
+hash-embedder settings, so both stay offline whether started through
+`make` or directly with `uv run python examples/demo.py`.
 
 With the default settings the first upload downloads the embedding model
 (`all-MiniLM-L6-v2`, about 80 MB) and the first question the cross-encoder
