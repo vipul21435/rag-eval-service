@@ -1,6 +1,28 @@
 # Changelog
 
-All notable changes to this project are documented here.
+All notable changes to this project are documented here. Versions 2.x
+describe the upstream project, Local PDF Chat RAG by Will Wei; the fork
+restarts at 0.1.0.
+
+## [Unreleased]
+
+### Added
+
+- `core/ingest.py`: a typed ingestion pipeline (extract, chunk, embed, index)
+  that returns a structured per-file report and is shared by every entry point.
+- `pyproject.toml` with a committed `uv.lock` on Python 3.12; torch comes from
+  the PyTorch CPU index on Linux.
+
+### Changed
+
+- `POST /api/upload` reports chunk counts from the ingestion report instead of
+  parsing the demo UI's status text.
+- Office-format parsers (DOCX, PPTX, Excel) are an optional `documents` extra.
+
+### Removed
+
+- The Gradio demo UI, its screenshots, the sample Chinese PDF, the generated
+  OpenWiki pages and the Chinese README. The REST API is the only interface.
 
 ## [2.1.0] - 2026-08-12
 

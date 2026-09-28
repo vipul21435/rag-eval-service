@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a focused improvement to the educational RAG pipeline
+description: Propose a focused improvement to the RAG service or evaluation suite
 title: "[Feature]: "
 labels: [enhancement]
 body:

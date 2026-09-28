@@ -1,4 +1,4 @@
-# Contributing to Local PDF Chat RAG
+# Contributing to rag-eval-service
 
 Thanks for helping improve this project. Contributions should keep the RAG pipeline understandable, runnable, and easy to inspect.
 
@@ -25,9 +25,9 @@ Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; run `uv l
 ## Pull request expectations
 
 1. Create a focused branch from the latest `main`.
-2. Keep the change small enough to review and explain why it belongs in this educational reference implementation.
+2. Keep the change small enough to review and explain why it belongs in the service.
 3. Add or update tests for behavior changes.
-4. Keep `README.md` and `README.zh-CN.md` synchronized when public usage changes.
+4. Update `README.md` and `CHANGELOG.md` when public usage changes.
 5. Run the compile and test commands above before opening the pull request.
 6. Complete the pull request template and link related issues.
 

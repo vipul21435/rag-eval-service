@@ -7,6 +7,7 @@ from pydantic import BaseModel
 import tempfile
 import os
 import re
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 import logging
 import asyncio
@@ -16,23 +17,13 @@ from version import __version__
 # 从重构后的模块导入
 from config import SILICONFLOW_API_KEY, MAGICK_API_KEY, is_configured_api_key
 from core.generator import query_answer
+from core.ingest import SourceFile, ingest_files
 from core.vector_store import vector_store
 from features.web_search import check_serpapi_key
 from utils.network import is_port_available
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("rag-api")
-
-
-class ProgressCallback:
-    def __init__(self):
-        self.progress = 0
-        self.description = ""
-
-    def __call__(self, progress, desc=None):
-        self.progress = progress
-        self.description = desc or ""
-        return self
 
 
 @asynccontextmanager
@@ -77,34 +68,33 @@ class FileProcessResult(BaseModel):
 @app.post("/api/upload", response_model=FileProcessResult)
 async def upload_file(file: UploadFile = File(...)):
     """处理文档并存入向量数据库"""
+    filename = file.filename or "upload"
+    suffix = os.path.splitext(filename)[1]
+    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-            content = await file.read()
-            tmp.write(content)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
             tmp_path = tmp.name
 
-        from rag_demo import process_multiple_files
-        progress = ProgressCallback()
-
-        result_text = await asyncio.to_thread(
-            process_multiple_files,
-            [type('obj', (object,), {"name": tmp_path})],
-            progress
+        report = await asyncio.to_thread(
+            ingest_files, [SourceFile(path=Path(tmp_path), name=filename)]
         )
-
-        os.unlink(tmp_path)
-        result = result_text[0] if isinstance(result_text, tuple) else result_text
-        chunk_match = re.search(r'(\d+) 个文本块', result)
-        chunks = int(chunk_match.group(1)) if chunk_match else 0
-
+        result = report.files[0]
+        if result.ok:
+            message = f"{filename}: indexed {result.chunks} chunk(s)"
+        else:
+            message = f"{filename}: {result.error}"
         return {
-            "status": "success" if "成功" in result else "error",
-            "message": result,
-            "file_info": {"filename": file.filename, "chunks": chunks}
+            "status": "success" if result.ok else "error",
+            "message": message,
+            "file_info": {"filename": filename, "chunks": result.chunks}
         }
     except Exception as e:
         logger.error(f"文件处理失败: {str(e)}")
         raise HTTPException(500, f"文档处理失败: {str(e)}") from e
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.post("/api/ask", response_model=AnswerResponse)

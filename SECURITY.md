@@ -6,8 +6,8 @@ Security fixes are applied to the latest release and the current `main` branch. 
 
 | Version | Supported |
 | --- | --- |
-| 2.1.x | Yes |
-| 2.0.x and earlier | No |
+| current `main` | Yes |
+| upstream Local PDF Chat RAG releases | No; report those upstream |
 
 ## Reporting a vulnerability
 
