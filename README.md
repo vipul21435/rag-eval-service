@@ -53,7 +53,8 @@ cp .env.example .env       # optional: pick an LLM provider or tune retrieval
 uv run python api_router.py
 ```
 
-The API listens on the first free port in `17995-17999`. Main endpoints:
+The API listens on `127.0.0.1` and the first free port in `17995-17999`
+(`API_HOST`, `API_PORT`). Main endpoints:
 
 - `GET /api/status`: runtime and provider configuration status;
 - `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
@@ -86,6 +87,22 @@ list with defaults.
 | `RERANK_METHOD`, `RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
 | `CHUNK_SIZE`, `CHUNK_OVERLAP`, `HYBRID_ALPHA`, `RETRIEVAL_TOP_K`, `RERANK_TOP_K`, `MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
 | `SERPAPI_KEY` | Optional web-search credential |
+| `API_HOST`, `API_PORT` | Bind address (`127.0.0.1`) and port (first free in `17995-17999`) |
+| `CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
+| `MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
+| `API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
+
+## Exposing the API
+
+The defaults keep the service private to the machine it runs on: it binds
+the loopback interface, sends no CORS headers (so a web page on another
+origin cannot read answers or replace the knowledge base through the
+operator's browser), and caps uploads at `MAX_UPLOAD_MB`. To reach it from
+other hosts or a browser front end, set `API_HOST=0.0.0.0`, list the front
+end's origin in `CORS_ALLOW_ORIGINS`, and set `API_TOKEN`; the server logs a
+warning when it is exposed without a token. Indexed documents and answers
+are only as private as whoever can reach the port, so put a reverse proxy
+with TLS in front for anything beyond a trusted network.
 
 ## Repository layout
 

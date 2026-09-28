@@ -63,6 +63,27 @@ MAX_RETRIEVAL_ITERATIONS = _env_int("MAX_RETRIEVAL_ITERATIONS", 3)  # recursive 
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 SEARCH_ENGINE = "google"
 
+# --- HTTP API ---------------------------------------------------------------
+# The API has no authentication unless API_TOKEN is set, so it listens on the
+# loopback interface by default. Set API_HOST=0.0.0.0 to expose it, ideally
+# together with API_TOKEN.
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
+# Unset: the first free port in api_router.CANDIDATE_PORTS is used.
+API_PORT = int(os.environ["API_PORT"]) if os.getenv("API_PORT") else None
+
+
+def _env_csv(name: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
+
+
+# Browser origins allowed to call the API (comma-separated). Empty means no
+# CORS headers at all: pages on other origins cannot read responses.
+CORS_ALLOW_ORIGINS = _env_csv("CORS_ALLOW_ORIGINS")
+# Largest document /api/upload accepts.
+MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 50)
+# When set, every /api request must carry "Authorization: Bearer <token>".
+API_TOKEN = os.getenv("API_TOKEN") or None
+
 
 def is_configured_api_key(api_key: str | None) -> bool:
     """True when ``api_key`` is a real value rather than empty or a ``Your...`` placeholder."""

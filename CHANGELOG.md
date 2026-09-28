@@ -49,6 +49,15 @@ restarts at 0.1.0.
 
 ### Fixed
 
+- The unauthenticated API bound `0.0.0.0` and answered every CORS preflight
+  with the caller's origin reflected and `allow-credentials: true`, so any web
+  page the operator visited could read answers to private documents, replace
+  the knowledge base and spend the configured API quotas. The server now binds
+  `127.0.0.1` (`API_HOST`), sends CORS headers only for origins listed in
+  `CORS_ALLOW_ORIGINS` and never allows credentials. `/api/upload` streams
+  the body to disk and rejects files over `MAX_UPLOAD_MB` with `413` instead
+  of reading an unbounded body into memory, and an optional `API_TOKEN`
+  requires `Authorization: Bearer <token>` on every `/api` request.
 - Query rewriting kept only the text before the first `<think>`, so reasoning
   models served by Ollama or an OpenAI-compatible server (which emit the
   reasoning first) produced an empty rewrite: the `NO_FURTHER_QUERY` sentinel

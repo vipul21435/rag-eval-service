@@ -1,21 +1,32 @@
-"""REST API: FastAPI application exposing upload, ask and status endpoints."""
+"""REST API: FastAPI application exposing upload, ask and status endpoints.
+
+Security defaults are local-first: the server binds the loopback interface,
+sends no CORS headers, caps upload size and, when ``API_TOKEN`` is set,
+requires a bearer token on every ``/api`` request. See ``config.py``.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import secrets
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from config import (
+    API_HOST,
+    API_PORT,
+    API_TOKEN,
+    CORS_ALLOW_ORIGINS,
+    MAX_UPLOAD_MB,
     OLLAMA_MODEL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -35,29 +46,27 @@ from version import __version__
 logger = logging.getLogger("rag-api")
 
 CANDIDATE_PORTS = (17995, 17996, 17997, 17998, 17999)
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    logger.info("API starting; default LLM provider: %s", detect_default_provider())
-    yield
-    logger.info("API stopped")
+# --- Authentication ---------------------------------------------------------
 
 
-app = FastAPI(
-    title="rag-eval-service",
-    description="Document question answering over local FAISS + BM25 hybrid retrieval",
-    version=__version__,
-    lifespan=lifespan,
-)
+async def require_api_token(authorization: Annotated[str | None, Header()] = None) -> None:
+    """Reject the request unless it carries the configured bearer token.
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    A no-op when ``API_TOKEN`` is unset (the local-first default).
+    """
+    expected = API_TOKEN
+    if expected is None:
+        return
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip(), expected):
+        raise HTTPException(401, "missing or invalid API token", headers={"WWW-Authenticate": "Bearer"})
+
+
+# --- Schemas ----------------------------------------------------------------
 
 
 class QuestionRequest(BaseModel):
@@ -79,7 +88,30 @@ class FileProcessResult(BaseModel):
     file_info: dict[str, Any] | None = None
 
 
-@app.post("/api/upload", response_model=FileProcessResult)
+# --- Routes -----------------------------------------------------------------
+
+router = APIRouter(prefix="/api", dependencies=[Depends(require_api_token)])
+
+
+async def _spool_upload(file: UploadFile, suffix: str) -> str:
+    """Copy ``file`` to a temp file in chunks; 413 once it exceeds the limit."""
+    written = 0
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp_path = tmp.name
+        try:
+            while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, f"file exceeds the upload limit of {MAX_UPLOAD_BYTES} bytes")
+                tmp.write(chunk)
+        except BaseException:
+            tmp.close()
+            os.unlink(tmp_path)
+            raise
+    return tmp_path
+
+
+@router.post("/upload", response_model=FileProcessResult)
 async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
     """Index one document, replacing the current knowledge base.
 
@@ -92,31 +124,27 @@ async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
         raise HTTPException(
             415, f"unsupported file format {suffix or '(none)'!r}; supported: {describe_supported_formats()}"
         )
-    tmp_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await file.read())
-            tmp_path = tmp.name
 
+    tmp_path = await _spool_upload(file, suffix)
+    try:
         report = await asyncio.to_thread(ingest_files, [SourceFile(path=Path(tmp_path), name=filename)])
-        result = report.files[0]
-        message = (
-            f"{filename}: indexed {result.chunks} chunk(s)" if result.ok else f"{filename}: {result.error}"
-        )
-        return {
-            "status": "success" if result.ok else "error",
-            "message": message,
-            "file_info": {"filename": filename, "chunks": result.chunks},
-        }
     except Exception as exc:
         logger.error("Document processing failed: %s", exc)
         raise HTTPException(500, f"Document processing failed: {exc}") from exc
     finally:
-        if tmp_path and os.path.exists(tmp_path):
+        if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+    result = report.files[0]
+    message = f"{filename}: indexed {result.chunks} chunk(s)" if result.ok else f"{filename}: {result.error}"
+    return {
+        "status": "success" if result.ok else "error",
+        "message": message,
+        "file_info": {"filename": filename, "chunks": result.chunks},
+    }
 
-@app.post("/api/ask", response_model=AnswerResponse)
+
+@router.post("/ask", response_model=AnswerResponse)
 async def ask_question(req: QuestionRequest) -> dict[str, Any]:
     """Answer a question from the indexed documents (and optionally the web)."""
     provider = resolve_provider(req.provider)
@@ -143,7 +171,7 @@ async def ask_question(req: QuestionRequest) -> dict[str, Any]:
     }
 
 
-@app.get("/api/status")
+@router.get("/status")
 async def check_status() -> dict[str, Any]:
     return {
         "status": "healthy",
@@ -158,10 +186,52 @@ async def check_status() -> dict[str, Any]:
     }
 
 
+# --- Application ------------------------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    logger.info("API starting; default LLM provider: %s", detect_default_provider())
+    if API_TOKEN is None and API_HOST not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning("API_HOST=%s without API_TOKEN: the API is reachable without authentication", API_HOST)
+    yield
+    logger.info("API stopped")
+
+
+def create_app(cors_origins: Sequence[str] | None = None) -> FastAPI:
+    """Build the application.
+
+    ``cors_origins`` lists the browser origins allowed to call the API; it
+    defaults to ``CORS_ALLOW_ORIGINS``. With no origins, no CORS middleware is
+    installed and browsers block cross-origin reads. Credentials are never
+    allowed, so an allowed origin cannot ride on the operator's cookies.
+    """
+    application = FastAPI(
+        title="rag-eval-service",
+        description="Document question answering over local FAISS + BM25 hybrid retrieval",
+        version=__version__,
+        lifespan=lifespan,
+    )
+    origins = list(CORS_ALLOW_ORIGINS if cors_origins is None else cors_origins)
+    if origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+    application.include_router(router)
+    return application
+
+
+app = create_app()
+
+
 if __name__ == "__main__":
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    port = next((p for p in CANDIDATE_PORTS if is_port_available(p)), CANDIDATE_PORTS[0])
-    logger.info("Starting API on port %d", port)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = API_PORT or next((p for p in CANDIDATE_PORTS if is_port_available(p)), CANDIDATE_PORTS[0])
+    logger.info("Starting API on %s:%d", API_HOST, port)
+    uvicorn.run(app, host=API_HOST, port=port)
