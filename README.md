@@ -109,7 +109,7 @@ itself. Five commands from a fresh clone:
 git clone https://github.com/vipul21435/recallmcp.git && cd recallmcp
 make install        # uv sync: locked dependencies, all extras and the dev tools
 make demo           # offline: hash embedder, 3 sample documents, 3 timed queries
-make test           # 171 tests with coverage; no network, models or credentials
+make test           # 174 tests with coverage; no network, models or credentials
 uv run recallmcp    # serve the API on http://127.0.0.1:17995
 ```
 
@@ -191,21 +191,21 @@ curl -s -X POST -H 'Content-Type: application/json' \
 ## Sample output
 
 `make demo` on this machine (Apple Silicon Mac, 8 cores, 8 GB RAM,
-Python 3.12; `RAG_EMBEDDING_PROVIDER=hash`, `RAG_RERANK_METHOD=none`):
+Python 3.12; the demo pins the hash embedder and no reranker):
 
 ```text
 RecallMCP demo: embedder=hash, reranker=none
 
-Ingest: 3 files -> 22 chunks in 7 ms
+Ingest: 3 files -> 22 chunks in 6 ms
   embedding-cache.md: 6 chunks
   hybrid-retrieval.md: 8 chunks
   operations.md: 8 chunks
   embedding cache after first ingest: entries=22 hits=0 misses=22
-Re-ingest (unchanged files): 22 chunks in 2 ms
+Re-ingest (unchanged files): 22 chunks in 1 ms
   embedding cache after re-ingest:    entries=22 hits=22 misses=22
   GET /ready -> 200
 
-Query 1: 'How are dense and BM25 scores combined?'  (cold 7.49 ms, warm p50 0.08 ms over 19 runs)
+Query 1: 'How are dense and BM25 scores combined?'  (cold 5.11 ms, warm p50 0.08 ms over 19 runs)
   1. score=0.860 source=hybrid-retrieval.md id=doc_2_chunk_3
      Each retriever returns its best RAG_RETRIEVAL_TOP_K candidates. The hybrid merge scores...
   2. score=0.784 source=hybrid-retrieval.md id=doc_2_chunk_2
@@ -213,7 +213,7 @@ Query 1: 'How are dense and BM25 scores combined?'  (cold 7.49 ms, warm p50 0.08
   3. score=0.700 source=operations.md id=doc_3_chunk_7
      The container image runs as a non-root user, defaults to the hash embedder so it needs ...
 
-Query 2: 'What key does the embedding cache use?'  (cold 0.77 ms, warm p50 0.08 ms over 19 runs)
+Query 2: 'What key does the embedding cache use?'  (cold 0.52 ms, warm p50 0.07 ms over 19 runs)
   1. score=0.846 source=embedding-cache.md id=doc_1_chunk_0
      # The embedding cache Embedding is the slow part of ingestion. A neural embedding model...
   2. score=0.818 source=embedding-cache.md id=doc_1_chunk_3
@@ -221,7 +221,7 @@ Query 2: 'What key does the embedding cache use?'  (cold 0.77 ms, warm p50 0.08 
   3. score=0.720 source=hybrid-retrieval.md id=doc_2_chunk_6
      reranking and keep the hybrid scores, which is what the demo does because the cross-enc...
 
-Query 3: 'What does GET /ready return before documents are indexed?'  (cold 0.73 ms, warm p50 0.09 ms over 19 runs)
+Query 3: 'What does GET /ready return before documents are indexed?'  (cold 0.53 ms, warm p50 0.09 ms over 19 runs)
   1. score=1.000 source=operations.md id=doc_3_chunk_2
      embedding model without loading it and reads the cache counters without embedding anyth...
   2. score=0.796 source=embedding-cache.md id=doc_1_chunk_0
@@ -229,7 +229,7 @@ Query 3: 'What does GET /ready return before documents are indexed?'  (cold 0.73
   3. score=0.560 source=hybrid-retrieval.md id=doc_2_chunk_4
      zero to one. A chunk found by both retrievers gets the sum of both parts, which is why ...
 
-Query latency: cold p50 0.77 ms (3 first runs); warm p50 0.08 ms, p95 0.10 ms (57 runs)
+Query latency: cold p50 0.53 ms (3 first runs); warm p50 0.08 ms, p95 0.09 ms (57 runs)
 Embedding cache at exit: entries=25 hits=79 misses=25
 ```
 
@@ -247,14 +247,14 @@ about retrieval quality, which the hash embedder does not have.
 
 | Measurement | Command | Result |
 | --- | --- | --- |
-| Ingest 3 Markdown files, 22 chunks | `make demo` | 7 ms (first run, 22 cache misses) |
-| Re-ingest the same files | `make demo` | 2 ms, 22 cache hits, 0 new misses |
-| Query latency, first run of each query | `make demo` | p50 0.77 ms over 3 queries |
-| Query latency, query vector cached | `make demo` | p50 0.08 ms, p95 0.10 ms over 57 runs |
-| Whole demo, wall clock | `time make demo` | 9.2 s (of which `uv run` start-up and imports are most) |
-| Test suite | `uv run pytest --cov=ragsvc` | 171 tests in 1.2 s, 85% line coverage |
-| Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 2 s (warm uv cache), 10 s, 9 s |
-| Container image | `docker build -t recallmcp:dev .` | 93 MB image; 60 s with a warm layer cache, 102 s from an empty one (base image already pulled) |
+| Ingest 3 Markdown files, 22 chunks | `make demo` | 6 ms (first run, 22 cache misses) |
+| Re-ingest the same files | `make demo` | 1 ms, 22 cache hits, 0 new misses |
+| Query latency, first run of each query | `make demo` | p50 0.53 ms over 3 queries (the very first query pays 5 ms of lazy set-up) |
+| Query latency, query vector cached | `make demo` | p50 0.08 ms, p95 0.09 ms over 57 runs |
+| Whole demo, wall clock | `time make demo` | 0.5 s with a warm virtualenv (interpreter start-up and imports are most of it) |
+| Test suite | `uv run pytest --cov=ragsvc` | 174 tests in 2.3 s (one runs the demo in a subprocess), 85% line coverage |
+| Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 1.8 s (warm uv cache, 1.0 GB virtualenv), 3.2 s for the first `make demo` (uv builds the project; 0.4 s on the second run), 4.3 s |
+| Container image | `docker build -t recallmcp:dev .` | 93 MB compressed content (`docker image inspect --format '{{.Size}}'`: 93,484,343 bytes), 406 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
 
 ## Design decisions
 
@@ -394,7 +394,7 @@ src/ragsvc/
 examples/
   demo.py                  `make demo`
   docs/                    Three sample Markdown documents
-tests/                     171 tests that need no network access or credentials
+tests/                     174 tests that need no network access or credentials
 Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 ```
 
