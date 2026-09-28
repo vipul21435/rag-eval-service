@@ -172,11 +172,13 @@ def call_llm(prompt: str, provider: Provider, temperature: float = 0.7, max_toke
 
 
 def call_llm_simple(prompt: str, provider: Provider) -> str:
-    """Single-line LLM call for query rewriting; strips any reasoning block."""
-    result = call_llm(prompt, provider).strip()
-    if "<think>" in result:
-        result = result.split("<think>")[0].strip()
-    return result
+    """Single-line LLM call for query rewriting; drops any reasoning blocks.
+
+    Reasoning models put ``<think>...</think>`` before the answer (Ollama,
+    most OpenAI-compatible servers) or after it (``reasoning_content`` as
+    appended by ``_extract_openai_compatible_content``); both are removed.
+    """
+    return split_thinking(call_llm(prompt, provider)).answer
 
 
 # --- Prompting --------------------------------------------------------------

@@ -213,7 +213,9 @@ def recursive_retrieval(
         except Exception as exc:  # noqa: BLE001 - keep what we have if the LLM is unavailable
             logger.error("Query rewriting failed: %s", exc)
             break
-        if NO_FURTHER_QUERY in next_query:
+        if not next_query or NO_FURTHER_QUERY in next_query:
+            # An empty rewrite (reasoning-only output, or nothing at all) is
+            # treated as "sufficient": searching for "" would only add noise.
             logger.info("LLM reported the context is sufficient")
             break
         if len(next_query) > MAX_REWRITTEN_QUERY_LENGTH:

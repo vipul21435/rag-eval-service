@@ -48,12 +48,30 @@ def test_extract_content_rejects_empty_choices():
         _extract_openai_compatible_content({"choices": []})
 
 
-def test_call_llm_simple_strips_reasoning(monkeypatch):
-    monkeypatch.setattr(
-        generator, "call_llm", lambda prompt, provider, **kw: "  refined query <think>why</think>"
-    )
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "  refined query <think>why</think>",
+        "<think>why</think>\n\nrefined query",
+        "<think>first</think>refined <think>second</think>query",
+    ],
+    ids=["trailing", "leading", "interleaved"],
+)
+def test_call_llm_simple_drops_reasoning_wherever_it_appears(monkeypatch, raw):
+    monkeypatch.setattr(generator, "call_llm", lambda prompt, provider, **kw: raw)
 
     assert call_llm_simple("prompt", "ollama") == "refined query"
+
+
+def test_call_llm_simple_keeps_sentinel_after_leading_reasoning(monkeypatch):
+    # deepseek-r1 / qwen3 served by Ollama reason first, then answer.
+    monkeypatch.setattr(
+        generator,
+        "call_llm",
+        lambda prompt, provider, **kw: "<think>The summary already answers it.</think>\n\nNO_FURTHER_QUERY",
+    )
+
+    assert call_llm_simple("prompt", "ollama") == "NO_FURTHER_QUERY"
 
 
 def test_answer_question_requires_documents_unless_web_search():

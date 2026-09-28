@@ -161,6 +161,63 @@ def test_recursive_retrieval_deduplicates_web_results_across_iterations(monkeypa
     assert len(metadata) == 1
 
 
+@pytest.fixture
+def local_only_retrieval(monkeypatch):
+    """Stub retrieval so each round finds one local chunk; return the queries embedded per round."""
+    queries: list[str] = []
+
+    def record_query(query):
+        queries.append(query)
+        return np.zeros((1, 4), dtype="float32")
+
+    monkeypatch.setattr(retriever, "check_serpapi_key", lambda: False)
+    monkeypatch.setattr(retriever, "encode_query", record_query)
+    monkeypatch.setattr(
+        vector_store,
+        "search",
+        lambda query_embedding, k: (["BM25 ranks by term frequency."], ["doc-1"], [{}]),
+    )
+    monkeypatch.setattr(bm25_manager, "bm25_index", None)
+    monkeypatch.setattr(
+        retriever,
+        "rerank_results",
+        lambda query, docs, ids, metadata, top_k: [
+            (doc_id, {"content": doc, "metadata": meta, "score": 1.0})
+            for doc_id, doc, meta in zip(ids, docs, metadata, strict=True)
+        ],
+    )
+    return queries
+
+
+def test_recursive_retrieval_stops_on_sentinel_after_leading_reasoning(monkeypatch, local_only_retrieval):
+    monkeypatch.setattr(
+        "core.generator.call_llm",
+        lambda prompt, provider, **kw: "<think>The summary already answers it.</think>\n\nNO_FURTHER_QUERY",
+    )
+
+    contexts, doc_ids, _ = retriever.recursive_retrieval("what is BM25?", max_iterations=3)
+
+    assert local_only_retrieval == ["what is BM25?"]
+    assert doc_ids == ["doc-1"]
+    assert contexts == ["BM25 ranks by term frequency."]
+
+
+def test_recursive_retrieval_treats_empty_rewrite_as_sufficient(monkeypatch, local_only_retrieval):
+    monkeypatch.setattr("core.generator.call_llm_simple", lambda prompt, provider: "")
+
+    retriever.recursive_retrieval("what is BM25?", max_iterations=3)
+
+    assert local_only_retrieval == ["what is BM25?"]
+
+
+def test_recursive_retrieval_uses_the_rewritten_query_for_the_next_round(monkeypatch, local_only_retrieval):
+    monkeypatch.setattr("core.generator.call_llm_simple", lambda prompt, provider: "BM25 scoring formula")
+
+    retriever.recursive_retrieval("what is BM25?", max_iterations=2)
+
+    assert local_only_retrieval == ["what is BM25?", "BM25 scoring formula"]
+
+
 def test_build_prompt_treats_retrieved_content_as_untrusted_data():
     prompt = _build_prompt(
         question="What changed?",

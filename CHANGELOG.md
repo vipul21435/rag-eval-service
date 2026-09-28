@@ -49,6 +49,12 @@ restarts at 0.1.0.
 
 ### Fixed
 
+- Query rewriting kept only the text before the first `<think>`, so reasoning
+  models served by Ollama or an OpenAI-compatible server (which emit the
+  reasoning first) produced an empty rewrite: the `NO_FURTHER_QUERY` sentinel
+  was lost and every remaining retrieval round searched for `""`. Reasoning
+  blocks are now removed wherever they appear, and an empty rewrite ends the
+  loop.
 - The default reranker model was a bi-encoder
   (`distiluse-base-multilingual-cased-v2`) loaded as a cross-encoder, which
   scores with an untrained head; the default is now
