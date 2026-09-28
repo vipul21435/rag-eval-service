@@ -64,7 +64,10 @@ def resolve_document(path: str, settings: Settings) -> Path:
     on.
     """
     root = settings.mcp_document_root.resolve()
-    target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    try:
+        target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    except (ValueError, OSError) as exc:  # a NUL byte, or a path the OS cannot resolve
+        raise ToolError(f"{path!r} is not a valid path: {exc}") from exc
     if not target.is_relative_to(root):
         raise ToolError(f"{path!r} is outside the document root {root}")
     if not target.is_file():

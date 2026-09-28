@@ -179,7 +179,8 @@ protocol messages.
 | `list_documents` | none | `{documents: [{doc_id, source, chunks}], total_chunks}` |
 | `health` | none | The `GET /health` body: version, providers, index, embedding cache counters |
 
-A path outside the document root, a missing file, an unsupported format, a
+A path outside the document root (or one the OS cannot resolve, such as a
+name with a NUL byte), a missing file, an unsupported format, a
 file over `RAG_MAX_UPLOAD_MB`, an empty query or a search on an empty
 knowledge base returns an MCP tool error (`isError: true`) whose text
 names the problem, so an agent can correct its call. `search`,

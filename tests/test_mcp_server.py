@@ -163,6 +163,7 @@ async def test_ingest_rejects_files_outside_the_root_unsupported_and_empty(docs:
         missing = await session.call_tool("ingest_document", {"path": "nope.md"})
         unsupported = await session.call_tool("ingest_document", {"path": "notes.csv"})
         empty = await session.call_tool("ingest_document", {"path": "empty.md"})
+        invalid = await session.call_tool("ingest_document", {"path": "a\x00b.md"})
         listed = payload(await session.call_tool("list_documents"))
 
     assert "outside the document root" in error_text(escaped)
@@ -170,6 +171,7 @@ async def test_ingest_rejects_files_outside_the_root_unsupported_and_empty(docs:
     assert "is not a file under" in error_text(missing)
     assert error_text(unsupported).startswith("unsupported file format '.csv'")
     assert error_text(empty) == "empty.md: document is empty or has no extractable text"
+    assert error_text(invalid).startswith("'a\\x00b.md' is not a valid path: ")
     assert listed == {"documents": [], "total_chunks": 0}
 
 
