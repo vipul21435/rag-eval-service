@@ -43,6 +43,7 @@ from ragsvc.core.generator import KnowledgeBaseEmptyError, ProviderError, answer
 from ragsvc.core.ingest import SourceFile, ingest_files
 from ragsvc.core.vector_store import vector_store
 from ragsvc.embeddings import CachedEmbedder
+from ragsvc.middleware import RequestIdMiddleware
 
 logger = logging.getLogger("rag-api")
 
@@ -309,6 +310,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     the API. With no origins, no CORS middleware is installed and browsers
     block cross-origin reads. Credentials are never allowed, so an allowed
     origin cannot ride on the operator's cookies.
+
+    Every response carries an ``X-Request-ID`` (the client's, or a fresh
+    one) and every request is written to the ``ragsvc.access`` log.
     """
     if settings is None:
         settings = get_settings()
@@ -329,6 +333,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["GET", "POST"],
             allow_headers=["Authorization", "Content-Type"],
         )
+    # Added last so it is outermost: preflight and error responses get an id too.
+    application.add_middleware(RequestIdMiddleware)
     application.include_router(router)
     application.include_router(ops_router)
     return application

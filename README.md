@@ -39,6 +39,11 @@ upstream.
   hit and miss counters.
 - Security defaults: loopback bind, CORS allowlist without credentials,
   an upload size cap and an optional bearer token.
+- Operations endpoints and logs: `GET /health` (version, provider names,
+  index size, embedding cache counters) and `GET /ready`; an
+  `X-Request-ID` on every response (echoed or generated) that every log
+  record written during the request carries; JSON access logs with method,
+  path, status and duration.
 - A typed ingestion pipeline with per-file reports; a failed upload keeps
   the previous knowledge base and concurrent uploads are serialized, with
   new indexes swapped in as a snapshot.
@@ -136,6 +141,7 @@ message naming the variable. Every variable is optional; see
 | `RAG_CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
 | `RAG_MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
 | `RAG_API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
+| `RAG_LOG_LEVEL`, `RAG_LOG_FORMAT` | Root log level (`INFO`) and `json` (default, one object per line) or `text` |
 
 ### Embeddings
 
@@ -155,6 +161,25 @@ Vectors are kept in an SQLite cache keyed by `(provider, model,
 sha256(text))`, so re-indexing an unchanged document embeds nothing and
 switching models never serves stale vectors. `GET /health` reports the
 cache's hit and miss counters.
+
+### Request ids and logs
+
+Every response carries an `X-Request-ID`: the client's own header when it
+sends a well-formed one (printable ASCII, up to 128 characters), otherwise
+a generated UUID. The id is bound to the request while it is served, so
+every log record the request produces carries it, and one access record
+per request is written to the `ragsvc.access` logger with the method,
+path, status, duration in milliseconds and client address. With
+`RAG_LOG_FORMAT=json` (the default) records are single-line JSON objects:
+
+```json
+{"time": "2026-09-29T00:00:00.000+00:00", "level": "INFO", "logger": "ragsvc.access",
+ "message": "GET /health -> 200 in 0.8 ms", "request_id": "3f1c...", "method": "GET",
+ "path": "/health", "status": 200, "duration_ms": 0.8, "client": "127.0.0.1"}
+```
+
+`RAG_LOG_FORMAT=text` prints the same records as readable lines with the
+request id in brackets.
 
 ## Exposing the API
 
@@ -178,8 +203,10 @@ mode by ``uv sync``.
 src/ragsvc/
   __init__.py              Package version
   __main__.py              `recallmcp` / `python -m ragsvc`: serve the API
-  api.py                   FastAPI application
-  config.py                Typed RAG_ settings: providers, models, retrieval, API
+  api.py                   FastAPI application: upload, ask, status, health, ready
+  config.py                Typed RAG_ settings: providers, models, retrieval, API, logging
+  middleware.py            X-Request-ID middleware and the access log
+  logging_setup.py         JSON / text log handler carrying the request id
   embeddings/
     base.py                EmbeddingProvider protocol and EmbeddingError
     hashing.py             Deterministic feature-hashing embedder (tests, demo)

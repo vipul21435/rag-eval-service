@@ -20,6 +20,12 @@ restarts at 0.1.0.
   index size, embedding cache counters; never loads a model) and
   `GET /ready` (`200` once documents are indexed, `503` before), both outside
   `/api` so they need no token.
+- Request ids and structured logs: every response carries an `X-Request-ID`
+  (the client's well-formed one, or a generated UUID), log records written
+  while serving a request carry its id, and one access record per request
+  (method, path, status, duration) goes to the `ragsvc.access` logger.
+  `RAG_LOG_FORMAT=json` (default) writes one JSON object per line;
+  `RAG_LOG_LEVEL` sets the root level. Uvicorn's own access log is off.
 - `core/ingest.py`: a typed ingestion pipeline (extract, chunk, embed, index)
   that returns a structured per-file report and is shared by every entry point.
 - `pyproject.toml` with a committed `uv.lock` on Python 3.12; torch comes from
