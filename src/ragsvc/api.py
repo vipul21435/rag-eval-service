@@ -21,9 +21,9 @@ from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, Up
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from config import (
+from ragsvc import __version__
+from ragsvc.config import (
     API_HOST,
-    API_PORT,
     API_TOKEN,
     CORS_ALLOW_ORIGINS,
     MAX_UPLOAD_MB,
@@ -35,13 +35,11 @@ from config import (
     is_configured_api_key,
     resolve_provider,
 )
-from core.document_loader import SUPPORTED_EXTENSIONS, describe_supported_formats
-from core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
-from core.ingest import SourceFile, ingest_files
-from core.vector_store import vector_store
-from features.web_search import check_serpapi_key
-from utils.network import is_port_available
-from version import __version__
+from ragsvc.core.document_loader import SUPPORTED_EXTENSIONS, describe_supported_formats
+from ragsvc.core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
+from ragsvc.core.ingest import SourceFile, ingest_files
+from ragsvc.core.vector_store import vector_store
+from ragsvc.features.web_search import check_serpapi_key
 
 logger = logging.getLogger("rag-api")
 
@@ -226,12 +224,3 @@ def create_app(cors_origins: Sequence[str] | None = None) -> FastAPI:
 
 
 app = create_app()
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    port = API_PORT or next((p for p in CANDIDATE_PORTS if is_port_available(p)), CANDIDATE_PORTS[0])
-    logger.info("Starting API on %s:%d", API_HOST, port)
-    uvicorn.run(app, host=API_HOST, port=port)

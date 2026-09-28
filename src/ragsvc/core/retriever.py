@@ -11,12 +11,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from config import HYBRID_ALPHA, MAX_RETRIEVAL_ITERATIONS, RERANK_TOP_K, RETRIEVAL_TOP_K, Provider
-from core.bm25_index import BM25Hit, bm25_manager
-from core.embeddings import encode_query
-from core.reranker import RankedDocs, ScoredDoc, rerank_results
-from core.vector_store import Metadata, vector_store
-from features.web_search import check_serpapi_key, search_web
+from ragsvc.config import HYBRID_ALPHA, MAX_RETRIEVAL_ITERATIONS, RERANK_TOP_K, RETRIEVAL_TOP_K, Provider
+from ragsvc.core.bm25_index import BM25Hit, bm25_manager
+from ragsvc.core.embeddings import encode_query
+from ragsvc.core.reranker import RankedDocs, ScoredDoc, rerank_results
+from ragsvc.core.vector_store import Metadata, vector_store
+from ragsvc.features.web_search import check_serpapi_key, search_web
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def recursive_retrieval(
 
         summary = "\n".join(current_contexts[:3])
         try:
-            from core.generator import call_llm_simple
+            from ragsvc.core.generator import call_llm_simple
 
             next_query = call_llm_simple(_build_rewrite_prompt(initial_query, summary), provider)
         except Exception as exc:  # noqa: BLE001 - keep what we have if the LLM is unavailable

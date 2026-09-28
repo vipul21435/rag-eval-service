@@ -1,4 +1,4 @@
-from features.conflict_detector import detect_conflicts
+from ragsvc.features.conflict_detector import detect_conflicts
 
 
 def test_agreeing_sources_are_not_a_conflict():

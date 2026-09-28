@@ -14,7 +14,7 @@ from typing import Any
 
 import requests
 
-from config import (
+from ragsvc.config import (
     OLLAMA_BASE_URL,
     OLLAMA_MODEL,
     OPENAI_API_KEY,
@@ -22,11 +22,11 @@ from config import (
     OPENAI_MODEL,
     Provider,
 )
-from core.retriever import recursive_retrieval
-from core.vector_store import Metadata, vector_store
-from features.conflict_detector import detect_conflicts
-from features.thinking_chain import split_thinking
-from utils.network import get_session
+from ragsvc.core.retriever import recursive_retrieval
+from ragsvc.core.vector_store import Metadata, vector_store
+from ragsvc.features.conflict_detector import detect_conflicts
+from ragsvc.features.thinking_chain import split_thinking
+from ragsvc.utils.network import get_session
 
 logger = logging.getLogger(__name__)
 

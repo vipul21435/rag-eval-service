@@ -1,13 +1,12 @@
 from fastapi.testclient import TestClient
 
-import api_router
-from version import __version__
+from ragsvc import __version__, api
 
 
 def test_status_reports_version_and_local_defaults_without_credentials(monkeypatch):
-    monkeypatch.setattr(api_router, "detect_default_provider", lambda: "ollama")
-    monkeypatch.setattr(api_router, "OPENAI_API_KEY", None)
-    client = TestClient(api_router.app)
+    monkeypatch.setattr(api, "detect_default_provider", lambda: "ollama")
+    monkeypatch.setattr(api, "OPENAI_API_KEY", None)
+    client = TestClient(api.app)
 
     status = client.get("/api/status").json()
 

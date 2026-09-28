@@ -1,14 +1,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import api_router
-from core.generator import Answer, KnowledgeBaseEmptyError, ProviderError
+from ragsvc import api
+from ragsvc.core.generator import Answer, KnowledgeBaseEmptyError, ProviderError
 
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(api_router, "detect_default_provider", lambda: "ollama")
-    return TestClient(api_router.app)
+    monkeypatch.setattr(api, "detect_default_provider", lambda: "ollama")
+    return TestClient(api.app)
 
 
 def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):
@@ -24,7 +24,7 @@ def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):
             reasoning="Both retrievers contribute a normalized score.",
         )
 
-    monkeypatch.setattr(api_router, "answer_question", fake_answer)
+    monkeypatch.setattr(api, "answer_question", fake_answer)
 
     response = client.post("/api/ask", json={"question": "What is hybrid retrieval?", "provider": "openai"})
 
@@ -45,7 +45,7 @@ def test_ask_uses_detected_default_provider(client, monkeypatch):
         seen.append(provider)
         return Answer(text="ok", provider=provider)
 
-    monkeypatch.setattr(api_router, "answer_question", fake_answer)
+    monkeypatch.setattr(api, "answer_question", fake_answer)
 
     response = client.post("/api/ask", json={"question": "hello"})
 
@@ -62,7 +62,7 @@ def test_ask_maps_empty_knowledge_base_to_409(client, monkeypatch):
     def empty(question, enable_web_search, provider):
         raise KnowledgeBaseEmptyError("The knowledge base is empty; upload documents first")
 
-    monkeypatch.setattr(api_router, "answer_question", empty)
+    monkeypatch.setattr(api, "answer_question", empty)
 
     response = client.post("/api/ask", json={"question": "anything"})
 
@@ -74,7 +74,7 @@ def test_ask_maps_provider_failure_to_502(client, monkeypatch):
     def failing(question, enable_web_search, provider):
         raise ProviderError("Ollama request to http://localhost:11434 failed: connection refused")
 
-    monkeypatch.setattr(api_router, "answer_question", failing)
+    monkeypatch.setattr(api, "answer_question", failing)
 
     response = client.post("/api/ask", json={"question": "anything"})
 

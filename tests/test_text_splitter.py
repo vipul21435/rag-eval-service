@@ -1,4 +1,4 @@
-from core.text_splitter import split_text
+from ragsvc.core.text_splitter import split_text
 
 
 def test_split_text_respects_chunk_size_and_overlap():
@@ -22,7 +22,7 @@ def test_split_text_prefers_paragraph_boundaries():
 
 
 def test_split_text_uses_configured_defaults():
-    from config import CHUNK_SIZE
+    from ragsvc.config import CHUNK_SIZE
 
     chunks = split_text("short text")
 

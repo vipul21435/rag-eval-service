@@ -19,6 +19,9 @@ restarts at 0.1.0.
 
 ### Changed
 
+- The service is an importable package, `ragsvc` under `src/`, instead of
+  top-level `core/`, `features/`, `utils/`, `config.py` and `api_router.py`
+  modules. `uv run ragsvc` (or `python -m ragsvc`) serves the API.
 - Local-first configuration: providers are `ollama` (default, auto-detected)
   and `openai` (any OpenAI-compatible endpoint via `OPENAI_*`). The
   SiliconFlow and Magick provider settings, the `hf-mirror.com` Hugging Face

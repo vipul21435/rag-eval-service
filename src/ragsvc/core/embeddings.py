@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from config import EMBED_MODEL_NAME
+from ragsvc.config import EMBED_MODEL_NAME
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer

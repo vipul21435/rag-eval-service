@@ -1,13 +1,13 @@
 import pytest
 
-from core.generator import ProviderError, _call_openai_compatible_api
+from ragsvc.core.generator import ProviderError, _call_openai_compatible_api
 
 
 def test_cloud_provider_fails_cleanly_without_api_key(monkeypatch):
     def unexpected_network_call(*args, **kwargs):
         raise AssertionError("a missing API key must not trigger an HTTP request")
 
-    monkeypatch.setattr("core.generator.requests.post", unexpected_network_call)
+    monkeypatch.setattr("ragsvc.core.generator.requests.post", unexpected_network_call)
 
     with pytest.raises(ProviderError, match="Test Provider API key is not configured"):
         _call_openai_compatible_api(
@@ -23,7 +23,7 @@ def test_cloud_provider_fails_cleanly_without_api_url(monkeypatch):
     def unexpected_network_call(*args, **kwargs):
         raise AssertionError("a missing API URL must not trigger an HTTP request")
 
-    monkeypatch.setattr("core.generator.requests.post", unexpected_network_call)
+    monkeypatch.setattr("ragsvc.core.generator.requests.post", unexpected_network_call)
 
     with pytest.raises(ProviderError, match="Test Provider API URL is not configured"):
         _call_openai_compatible_api(

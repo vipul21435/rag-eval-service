@@ -1,6 +1,6 @@
 import pytest
 
-from features.thinking_chain import ThinkingSplit, split_thinking
+from ragsvc.features.thinking_chain import ThinkingSplit, split_thinking
 
 
 def test_trailing_think_block_is_separated_from_the_answer():

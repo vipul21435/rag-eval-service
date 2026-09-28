@@ -14,8 +14,8 @@ import threading
 from functools import lru_cache
 from typing import TYPE_CHECKING, TypedDict
 
-from config import OLLAMA_BASE_URL, OLLAMA_MODEL, RERANK_METHOD, RERANK_MODEL_NAME
-from core.vector_store import Metadata
+from ragsvc.config import OLLAMA_BASE_URL, OLLAMA_MODEL, RERANK_METHOD, RERANK_MODEL_NAME
+from ragsvc.core.vector_store import Metadata
 
 if TYPE_CHECKING:
     from sentence_transformers import CrossEncoder
@@ -86,7 +86,7 @@ def rerank_with_cross_encoder(
 @lru_cache(maxsize=32)
 def get_llm_relevance_score(query: str, doc: str) -> float:
     """Ask the local Ollama model for a 0-10 relevance score (cached per pair)."""
-    from utils.network import get_session
+    from ragsvc.utils.network import get_session
 
     prompt = f"""Rate how relevant the document excerpt is to the query.
 Scale: 0 means completely unrelated, 10 means highly relevant.

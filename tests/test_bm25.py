@@ -1,4 +1,4 @@
-from core.bm25_index import BM25IndexManager, tokenize
+from ragsvc.core.bm25_index import BM25IndexManager, tokenize
 
 
 def test_tokenize_lowercases_and_splits_on_punctuation():

@@ -50,7 +50,7 @@ uv sync                    # runtime dependencies
 uv sync --extra documents  # also install DOCX / PPTX / Excel parsers
 cp .env.example .env       # optional: pick an LLM provider or tune retrieval
 
-uv run python api_router.py
+uv run ragsvc               # or: uv run python -m ragsvc
 ```
 
 The API listens on `127.0.0.1` and the first free port in `17995-17999`
@@ -106,22 +106,27 @@ with TLS in front for anything beyond a trusted network.
 
 ## Repository layout
 
+The service is the ``ragsvc`` package under ``src/``, installed in editable
+mode by ``uv sync``.
+
 ```text
-config.py                  Environment, model and retrieval settings
-api_router.py              FastAPI application
-version.py                 Single source of the package version
-core/
-  document_loader.py       Document text extraction
-  text_splitter.py         Text chunking
-  embeddings.py            Sentence-transformers embeddings
-  vector_store.py          FAISS index
-  bm25_index.py            BM25 index
-  retriever.py             Hybrid and recursive retrieval
-  reranker.py              Result reranking
-  generator.py             Context building and answer generation
-  ingest.py                Ingestion pipeline shared by all entry points
-features/                  Web search, conflict detection, reasoning-block splitting
-utils/                     HTTP session and port helpers
+src/ragsvc/
+  __init__.py              Package version
+  __main__.py              `python -m ragsvc` / `ragsvc`: serve the API
+  api.py                   FastAPI application
+  config.py                Environment, model and retrieval settings
+  core/
+    document_loader.py     Document text extraction
+    text_splitter.py       Text chunking
+    embeddings.py          Sentence-transformers embeddings
+    vector_store.py        FAISS index
+    bm25_index.py          BM25 index
+    retriever.py           Hybrid and recursive retrieval
+    reranker.py            Result reranking
+    generator.py           Context building and answer generation
+    ingest.py              Ingestion pipeline shared by all entry points
+  features/                Web search, conflict detection, reasoning-block splitting
+  utils/                   HTTP session and port helpers
 tests/                     Tests that need no network access or credentials
 ```
 

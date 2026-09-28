@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config import CHUNK_OVERLAP, CHUNK_SIZE
+from ragsvc.config import CHUNK_OVERLAP, CHUNK_SIZE
 
 # Tried in order: paragraph, line, CJK full stop / comma / semicolon / colon,
 # space, then individual characters as a last resort.

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.document_loader import (
+from ragsvc.core.document_loader import (
     SUPPORTED_EXTENSIONS,
     MissingParserError,
     UnsupportedFormatError,

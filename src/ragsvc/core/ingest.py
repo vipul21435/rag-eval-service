@@ -14,11 +14,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.bm25_index import bm25_manager
-from core.document_loader import extract_text
-from core.embeddings import encode_texts
-from core.text_splitter import split_text
-from core.vector_store import vector_store
+from ragsvc.core.bm25_index import bm25_manager
+from ragsvc.core.document_loader import extract_text
+from ragsvc.core.embeddings import encode_texts
+from ragsvc.core.text_splitter import split_text
+from ragsvc.core.vector_store import vector_store
 
 logger = logging.getLogger(__name__)
 

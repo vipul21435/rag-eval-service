@@ -4,10 +4,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import core.ingest as ingest
-from core.bm25_index import bm25_manager
-from core.ingest import SourceFile, ingest_files
-from core.vector_store import vector_store
+import ragsvc.core.ingest as ingest
+from ragsvc.core.bm25_index import bm25_manager
+from ragsvc.core.ingest import SourceFile, ingest_files
+from ragsvc.core.vector_store import vector_store
 
 
 def fake_encode_texts(texts, show_progress=False):

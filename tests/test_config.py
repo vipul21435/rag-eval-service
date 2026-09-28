@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-import config
+from ragsvc import config
 
 
 def test_api_key_validation_rejects_placeholders():

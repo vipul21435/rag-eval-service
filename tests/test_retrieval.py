@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-import core.retriever as retriever
-from core.bm25_index import BM25Hit, BM25IndexManager, bm25_manager
-from core.generator import _build_context, _build_prompt
-from core.retriever import hybrid_merge
-from core.vector_store import vector_store
+import ragsvc.core.retriever as retriever
+from ragsvc.core.bm25_index import BM25Hit, BM25IndexManager, bm25_manager
+from ragsvc.core.generator import _build_context, _build_prompt
+from ragsvc.core.retriever import hybrid_merge
+from ragsvc.core.vector_store import vector_store
 
 
 def test_bm25_returns_relevant_document_first():
@@ -145,7 +145,7 @@ def test_recursive_retrieval_deduplicates_web_results_across_iterations(monkeypa
     )
     bm25_manager.clear()
     monkeypatch.setattr(
-        "core.generator.call_llm_simple",
+        "ragsvc.core.generator.call_llm_simple",
         lambda prompt, provider: "refined retrieval query",
     )
 
@@ -191,7 +191,7 @@ def local_only_retrieval(monkeypatch):
 
 def test_recursive_retrieval_stops_on_sentinel_after_leading_reasoning(monkeypatch, local_only_retrieval):
     monkeypatch.setattr(
-        "core.generator.call_llm",
+        "ragsvc.core.generator.call_llm",
         lambda prompt, provider, **kw: "<think>The summary already answers it.</think>\n\nNO_FURTHER_QUERY",
     )
 
@@ -203,7 +203,7 @@ def test_recursive_retrieval_stops_on_sentinel_after_leading_reasoning(monkeypat
 
 
 def test_recursive_retrieval_treats_empty_rewrite_as_sufficient(monkeypatch, local_only_retrieval):
-    monkeypatch.setattr("core.generator.call_llm_simple", lambda prompt, provider: "")
+    monkeypatch.setattr("ragsvc.core.generator.call_llm_simple", lambda prompt, provider: "")
 
     retriever.recursive_retrieval("what is BM25?", max_iterations=3)
 
@@ -211,7 +211,9 @@ def test_recursive_retrieval_treats_empty_rewrite_as_sufficient(monkeypatch, loc
 
 
 def test_recursive_retrieval_uses_the_rewritten_query_for_the_next_round(monkeypatch, local_only_retrieval):
-    monkeypatch.setattr("core.generator.call_llm_simple", lambda prompt, provider: "BM25 scoring formula")
+    monkeypatch.setattr(
+        "ragsvc.core.generator.call_llm_simple", lambda prompt, provider: "BM25 scoring formula"
+    )
 
     retriever.recursive_retrieval("what is BM25?", max_iterations=2)
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from core.vector_store import AutoFaissIndex, VectorStore
+from ragsvc.core.vector_store import AutoFaissIndex, VectorStore
 
 
 def unit_vectors(count: int, dimension: int = 4) -> np.ndarray:

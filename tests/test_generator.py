@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-import core.generator as generator
-from core.generator import (
+import ragsvc.core.generator as generator
+from ragsvc.core.generator import (
     Answer,
     KnowledgeBaseEmptyError,
     ProviderError,
@@ -11,7 +11,7 @@ from core.generator import (
     answer_question,
     call_llm_simple,
 )
-from core.vector_store import vector_store
+from ragsvc.core.vector_store import vector_store
 
 
 @pytest.mark.parametrize(

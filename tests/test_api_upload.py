@@ -3,13 +3,13 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-import api_router
-from core.ingest import FileResult, IngestReport
+from ragsvc import api
+from ragsvc.core.ingest import FileResult, IngestReport
 
 
 @pytest.fixture
 def client():
-    return TestClient(api_router.app)
+    return TestClient(api.app)
 
 
 def test_upload_returns_chunk_count_and_removes_temp_file(client, monkeypatch):
@@ -22,7 +22,7 @@ def test_upload_returns_chunk_count_and_removes_temp_file(client, monkeypatch):
         seen["content"] = source.path.read_bytes()
         return IngestReport(files=[FileResult(name=source.name, chunks=3)], total_chunks=3)
 
-    monkeypatch.setattr(api_router, "ingest_files", fake_ingest)
+    monkeypatch.setattr(api, "ingest_files", fake_ingest)
 
     response = client.post(
         "/api/upload", files={"file": ("notes.md", b"# Notes\n\nHybrid retrieval", "text/markdown")}
@@ -45,7 +45,7 @@ def test_upload_rejects_unsupported_formats_before_ingesting(client, monkeypatch
     def unexpected_ingest(sources, progress=None):
         raise AssertionError("an unsupported format must be rejected before ingestion starts")
 
-    monkeypatch.setattr(api_router, "ingest_files", unexpected_ingest)
+    monkeypatch.setattr(api, "ingest_files", unexpected_ingest)
 
     response = client.post("/api/upload", files={"file": (filename, b"payload", "application/octet-stream")})
 
@@ -57,7 +57,7 @@ def test_upload_rejects_unsupported_formats_before_ingesting(client, monkeypatch
 
 def test_upload_reports_parse_failures_as_error_status(client, monkeypatch):
     monkeypatch.setattr(
-        api_router,
+        api,
         "ingest_files",
         lambda sources, progress=None: IngestReport(
             files=[FileResult(name="broken.pdf", chunks=0, error="document is empty")],

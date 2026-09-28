@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-ENV_PATH = Path(__file__).parent / ".env"
+# Relative to the working directory, like the rest of the service's file paths.
+ENV_PATH = Path(".env")
 # Existing environment variables take precedence over .env values.
 load_dotenv(ENV_PATH)
 
@@ -68,7 +69,7 @@ SEARCH_ENGINE = "google"
 # loopback interface by default. Set API_HOST=0.0.0.0 to expose it, ideally
 # together with API_TOKEN.
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
-# Unset: the first free port in api_router.CANDIDATE_PORTS is used.
+# Unset: the first free port in api.CANDIDATE_PORTS is used.
 API_PORT = int(os.environ["API_PORT"]) if os.getenv("API_PORT") else None
 
 

@@ -46,11 +46,14 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+ragsvc = "ragsvc.__main__:main"
+
 [tool.hatch.version]
-path = "version.py"
+path = "src/ragsvc/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["core", "features", "utils", "config.py", "api_router.py", "version.py"]
+packages = ["src/ragsvc"]
 
 [tool.uv]
 # torch on PyPI pulls CUDA wheels on Linux; use the CPU-only index there.
@@ -65,7 +68,6 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
 addopts = "-ra --strict-markers -p no:langsmith"
 
 [tool.ruff]
@@ -97,7 +99,8 @@ select = [
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-files = ["config.py", "api_router.py", "version.py", "core", "features", "utils", "tests"]
+files = ["src", "tests"]
+mypy_path = "src"
 exclude = ["\\.venv"]
 
 [[tool.mypy.overrides]]

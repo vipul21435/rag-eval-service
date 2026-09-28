@@ -5,8 +5,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-import api_router
-from core.ingest import FileResult, IngestReport
+from ragsvc import api
+from ragsvc.core.ingest import FileResult, IngestReport
 
 EVIL = "https://evil.example"
 ALLOWED = "https://ui.example"
@@ -14,7 +14,7 @@ ALLOWED = "https://ui.example"
 
 @pytest.fixture(autouse=True)
 def fixed_provider(monkeypatch):
-    monkeypatch.setattr(api_router, "detect_default_provider", lambda: "ollama")
+    monkeypatch.setattr(api, "detect_default_provider", lambda: "ollama")
 
 
 def preflight(client: TestClient, origin: str, path: str = "/api/ask"):
@@ -32,7 +32,7 @@ def preflight(client: TestClient, origin: str, path: str = "/api/ask"):
 
 
 def test_default_app_sends_no_cors_headers_to_any_origin():
-    client = TestClient(api_router.app)
+    client = TestClient(api.app)
 
     assert "access-control-allow-origin" not in preflight(client, EVIL).headers
     response = client.get("/api/status", headers={"Origin": EVIL, "Cookie": "session=abc"})
@@ -42,7 +42,7 @@ def test_default_app_sends_no_cors_headers_to_any_origin():
 
 
 def test_allowlisted_origin_is_admitted_without_credentials_and_others_are_not():
-    client = TestClient(api_router.create_app(cors_origins=[ALLOWED]))
+    client = TestClient(api.create_app(cors_origins=[ALLOWED]))
 
     allowed = preflight(client, ALLOWED)
     assert allowed.status_code == 200
@@ -56,8 +56,8 @@ def test_allowlisted_origin_is_admitted_without_credentials_and_others_are_not()
 
 
 def test_app_factory_defaults_to_the_configured_allowlist(monkeypatch):
-    monkeypatch.setattr(api_router, "CORS_ALLOW_ORIGINS", (ALLOWED,))
-    client = TestClient(api_router.create_app())
+    monkeypatch.setattr(api, "CORS_ALLOW_ORIGINS", (ALLOWED,))
+    client = TestClient(api.create_app())
 
     assert preflight(client, ALLOWED).headers["access-control-allow-origin"] == ALLOWED
 
@@ -66,15 +66,15 @@ def test_app_factory_defaults_to_the_configured_allowlist(monkeypatch):
 
 
 def test_upload_over_the_size_limit_is_rejected_before_ingestion(monkeypatch, tmp_path):
-    monkeypatch.setattr(api_router, "MAX_UPLOAD_BYTES", 16)
-    monkeypatch.setattr(api_router, "_UPLOAD_CHUNK_BYTES", 4)
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 16)
+    monkeypatch.setattr(api, "_UPLOAD_CHUNK_BYTES", 4)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
     def unexpected_ingest(sources, progress=None):
         raise AssertionError("an oversized upload must be rejected before ingestion starts")
 
-    monkeypatch.setattr(api_router, "ingest_files", unexpected_ingest)
-    client = TestClient(api_router.app)
+    monkeypatch.setattr(api, "ingest_files", unexpected_ingest)
+    client = TestClient(api.app)
 
     response = client.post("/api/upload", files={"file": ("big.md", b"x" * 17, "text/markdown")})
 
@@ -84,8 +84,8 @@ def test_upload_over_the_size_limit_is_rejected_before_ingestion(monkeypatch, tm
 
 
 def test_upload_at_the_size_limit_is_accepted(monkeypatch):
-    monkeypatch.setattr(api_router, "MAX_UPLOAD_BYTES", 16)
-    monkeypatch.setattr(api_router, "_UPLOAD_CHUNK_BYTES", 4)
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 16)
+    monkeypatch.setattr(api, "_UPLOAD_CHUNK_BYTES", 4)
     seen: dict[str, object] = {}
 
     def fake_ingest(sources, progress=None):
@@ -94,8 +94,8 @@ def test_upload_at_the_size_limit_is_accepted(monkeypatch):
         seen["path"] = str(source.path)
         return IngestReport(files=[FileResult(name=source.name, chunks=1)], total_chunks=1)
 
-    monkeypatch.setattr(api_router, "ingest_files", fake_ingest)
-    client = TestClient(api_router.app)
+    monkeypatch.setattr(api, "ingest_files", fake_ingest)
+    client = TestClient(api.app)
 
     response = client.post("/api/upload", files={"file": ("ok.md", b"x" * 16, "text/markdown")})
 
@@ -109,8 +109,8 @@ def test_upload_at_the_size_limit_is_accepted(monkeypatch):
 
 @pytest.fixture
 def token_client(monkeypatch):
-    monkeypatch.setattr(api_router, "API_TOKEN", "s3cret")
-    return TestClient(api_router.app)
+    monkeypatch.setattr(api, "API_TOKEN", "s3cret")
+    return TestClient(api.app)
 
 
 @pytest.mark.parametrize(
@@ -138,6 +138,6 @@ def test_valid_bearer_token_is_accepted(token_client):
 
 
 def test_no_token_configured_means_open_access(monkeypatch):
-    monkeypatch.setattr(api_router, "API_TOKEN", None)
+    monkeypatch.setattr(api, "API_TOKEN", None)
 
-    assert TestClient(api_router.app).get("/api/status").status_code == 200
+    assert TestClient(api.app).get("/api/status").status_code == 200

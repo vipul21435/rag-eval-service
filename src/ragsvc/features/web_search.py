@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 
 import requests
 
-from config import SEARCH_ENGINE, SERPAPI_KEY
+from ragsvc.config import SEARCH_ENGINE, SERPAPI_KEY
 
 logger = logging.getLogger(__name__)
 
