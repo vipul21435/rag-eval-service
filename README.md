@@ -230,6 +230,18 @@ the stdio process has already paid it by the time it answers `initialize`,
 which is dominated by interpreter start-up. The embedding cache is shared
 between the two halves, so the stdio ingest is a cache hit.
 
+The container image serves the tools as well; mount the documents and
+point the root at the mount:
+
+```bash
+docker run -i --rm -v "$PWD/examples/docs:/docs:ro" -e RAG_MCP_DOCUMENT_ROOT=/docs \
+  recallmcp:dev recallmcp-mcp
+```
+
+Used as the `command` of a stdio client this measured 5.0 s from spawn to
+`initialize` (container start-up), then `ingest_document` of the 8-chunk
+sample file and a first `search` of 16 ms inside the container.
+
 ## Reference
 
 ### Commands
