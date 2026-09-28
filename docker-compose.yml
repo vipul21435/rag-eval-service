@@ -1,0 +1,33 @@
+# docker compose up --build
+# The service listens on http://127.0.0.1:17995 with the hash embedder and no
+# reranker (no model download). The embedding cache persists in a named volume.
+services:
+  recallmcp:
+    build: .
+    image: recallmcp:dev
+    ports:
+      - "127.0.0.1:17995:17995"
+    environment:
+      RAG_API_HOST: 0.0.0.0
+      RAG_API_PORT: "17995"
+      RAG_EMBEDDING_PROVIDER: hash
+      RAG_RERANK_METHOD: none
+      RAG_EMBEDDING_CACHE_PATH: /data/embeddings.sqlite3
+      RAG_LOG_FORMAT: json
+      # Set RAG_API_TOKEN to require "Authorization: Bearer <token>" on /api.
+    volumes:
+      - recallmcp-cache:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:17995/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  recallmcp-cache: {}

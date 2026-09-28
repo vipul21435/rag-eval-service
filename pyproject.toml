@@ -17,14 +17,19 @@ dependencies = [
     "numpy>=1.26",
     "faiss-cpu>=1.8",
     "rank-bm25>=0.2.2",
-    "sentence-transformers>=3.0",
-    "torch>=2.2",
     "langchain-text-splitters>=0.3",
     "pdfminer.six>=20231228",
     "pydantic-settings>=2.7",
 ]
 
 [project.optional-dependencies]
+# The neural embedder and the cross-encoder reranker (torch, about 1 GB on
+# disk). Without it, RAG_EMBEDDING_PROVIDER=hash and RAG_RERANK_METHOD=none
+# run the service with deterministic lexical vectors and no model download.
+neural = [
+    "sentence-transformers>=3.0",
+    "torch>=2.2",
+]
 # Parsers for office formats; PDF, TXT and Markdown work without them.
 documents = [
     "python-docx>=1.1",

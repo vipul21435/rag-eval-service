@@ -1895,9 +1895,6 @@ dependencies = [
     { name = "python-multipart" },
     { name = "rank-bm25" },
     { name = "requests" },
-    { name = "sentence-transformers" },
-    { name = "torch", version = "2.14.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
-    { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'linux'" },
     { name = "uvicorn" },
 ]
 
@@ -1908,6 +1905,11 @@ documents = [
     { name = "python-docx" },
     { name = "python-pptx" },
     { name = "xlrd" },
+]
+neural = [
+    { name = "sentence-transformers" },
+    { name = "torch", version = "2.14.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
+    { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'linux'" },
 ]
 
 [package.dev-dependencies]
@@ -1938,13 +1940,13 @@ requires-dist = [
     { name = "python-pptx", marker = "extra == 'documents'", specifier = ">=1.0" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "requests", specifier = ">=2.31" },
-    { name = "sentence-transformers", specifier = ">=3.0" },
-    { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.2" },
-    { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.2", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "sentence-transformers", marker = "extra == 'neural'", specifier = ">=3.0" },
+    { name = "torch", marker = "sys_platform == 'linux' and extra == 'neural'", specifier = ">=2.2", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torch", marker = "sys_platform != 'linux' and extra == 'neural'", specifier = ">=2.2" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "xlrd", marker = "extra == 'documents'", specifier = ">=2.0.1" },
 ]
-provides-extras = ["documents"]
+provides-extras = ["documents", "neural"]
 
 [package.metadata.requires-dev]
 dev = [

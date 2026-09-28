@@ -24,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Install Python and dependencies
-        run: uv sync --locked --all-extras --dev
+        run: uv sync --locked --extra documents --dev
 
       - name: Lint
         run: uv run ruff check .
@@ -37,3 +37,36 @@ jobs:
 
       - name: Run tests
         run: uv run pytest --cov=ragsvc --cov-report=term-missing
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t recallmcp:ci .
+
+      - name: Validate compose file
+        run: docker compose config --quiet
+
+      - name: Smoke test /health and /ready
+        run: |
+          docker run --detach --name recallmcp --publish 127.0.0.1:17995:17995 recallmcp:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:17995/health; then
+              echo
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "service did not become healthy"
+              docker logs recallmcp
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:17995/ready)" = "503"
+          docker logs recallmcp
+          docker rm --force recallmcp
