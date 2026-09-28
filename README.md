@@ -254,7 +254,7 @@ about retrieval quality, which the hash embedder does not have.
 | Whole demo, wall clock | `time make demo` | 0.5 s with a warm virtualenv (interpreter start-up and imports are most of it) |
 | Test suite | `uv run pytest --cov=ragsvc` | 174 tests in 2.3 s (one runs the demo in a subprocess), 85% line coverage |
 | Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 1.8 s (warm uv cache, 1.0 GB virtualenv), 3.2 s for the first `make demo` (uv builds the project; 0.4 s on the second run), 4.3 s |
-| Container image | `docker build -t recallmcp:dev .` | 93 MB compressed content (`docker image inspect --format '{{.Size}}'`: 93,484,343 bytes), 406 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
+| Container image | `docker build -t recallmcp:dev .` | 93 MB compressed content (`docker image inspect --format '{{.Size}}'` reports about 93.5 million bytes; two builds differed by a few hundred), 406 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
 
 ## Design decisions
 
