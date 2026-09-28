@@ -3,7 +3,8 @@ Forked from https://github.com/weiwill88/Local_Pdf_Chat_RAG.
 # RecallMCP
 
 A local-first retrieval-augmented generation service: a FastAPI API over
-sentence-transformers embeddings, FAISS + BM25 hybrid retrieval and
+pluggable embeddings (sentence-transformers, or deterministic feature
+hashing for tests and demos), FAISS + BM25 hybrid retrieval and
 cross-encoder reranking. Everything runs on CPU with no paid API keys;
 hosted LLM providers are optional and configured through environment
 variables. A retrieval evaluation suite and an MCP server for agents are
@@ -30,6 +31,12 @@ upstream.
 - Local-first providers: a running Ollama is auto-detected, any
   OpenAI-compatible endpoint works behind environment variables, and no
   paid API is needed to run or test the service.
+- Pluggable embedding providers behind one protocol
+  (`ragsvc.embeddings`): sentence-transformers in production and a
+  deterministic feature-hashing embedder (word unigrams and bigrams,
+  L2-normalised, no model download) that the tests and the demo use, plus
+  an SQLite embedding cache keyed by provider, model and text hash with
+  hit and miss counters.
 - Security defaults: loopback bind, CORS allowlist without credentials,
   an upload size cap and an optional bearer token.
 - A typed ingestion pipeline with per-file reports; a failed upload keeps
@@ -41,7 +48,8 @@ upstream.
 - BM25 tokenization with a regex instead of jieba; English-only code,
   prompts and docs.
 - Ruff, strict mypy, pre-commit and GitHub Actions CI; tests run without
-  network access, model downloads or credentials.
+  network access, model downloads or credentials (the suite uses the hash
+  embedder throughout).
 
 ## Pipeline
 
@@ -92,7 +100,9 @@ The API listens on `127.0.0.1` and the first free port in `17995-17999`
   separate `reasoning` field.
 
 Embedding and reranking models are downloaded from the Hugging Face Hub on
-first use and cached locally. Answer generation needs an LLM: a local
+first use and cached locally; set `RAG_EMBEDDING_PROVIDER=hash` to run
+fully offline with deterministic (lexical, not semantic) embeddings.
+Answer generation needs an LLM: a local
 [Ollama](https://ollama.com/) server is used when one is running, otherwise
 any OpenAI-compatible endpoint configured through `RAG_OPENAI_*`. Without either,
 upload and retrieval work and `/api/ask` returns `502` with a clear message.
@@ -111,7 +121,10 @@ message naming the variable. Every variable is optional; see
 | `RAG_LLM_PROVIDER` | Force `ollama` or `openai` instead of auto-detecting |
 | `RAG_OLLAMA_BASE_URL`, `RAG_OLLAMA_MODEL` | Local Ollama server and model (`llama3.2`) |
 | `RAG_OPENAI_API_KEY`, `RAG_OPENAI_BASE_URL`, `RAG_OPENAI_MODEL` | Any OpenAI-compatible Chat Completions endpoint; the key and base URL are also read from `OPENAI_API_KEY` and `OPENAI_BASE_URL` |
+| `RAG_EMBEDDING_PROVIDER` | `sentence-transformers` (default) or `hash` (deterministic feature hashing, no model) |
 | `RAG_EMBED_MODEL_NAME` | Sentence-transformers embedding model (`all-MiniLM-L6-v2`) |
+| `RAG_HASH_EMBEDDING_DIMENSION` | Vector size of the hash provider (`256`) |
+| `RAG_EMBEDDING_CACHE_ENABLED`, `RAG_EMBEDDING_CACHE_PATH` | SQLite embedding cache (`true`, `.cache/recallmcp/embeddings.sqlite3`) |
 | `RAG_RERANK_METHOD`, `RAG_RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
 | `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_HYBRID_ALPHA`, `RAG_RETRIEVAL_TOP_K`, `RAG_RERANK_TOP_K`, `RAG_MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
 | `RAG_SERPAPI_KEY` | Optional web-search credential (also `SERPAPI_KEY`) |
@@ -119,6 +132,25 @@ message naming the variable. Every variable is optional; see
 | `RAG_CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
 | `RAG_MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
 | `RAG_API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
+
+### Embeddings
+
+`ragsvc.embeddings.EmbeddingProvider` is the protocol every provider
+implements: `embed_documents`, `embed_query`, `dimension`, `name` and
+`model_name`. Two providers ship:
+
+- `sentence-transformers` (default): a neural model from the Hugging Face
+  Hub, imported and loaded on first use so that importing the package and
+  building the app stay cheap.
+- `hash`: feature hashing of word unigrams and bigrams into a fixed-size
+  L2-normalised vector. It needs no model, gives identical vectors on every
+  machine and is what the test suite and the demo use. It matches on shared
+  words, not meaning, so keep it out of production retrieval.
+
+Vectors are kept in an SQLite cache keyed by `(provider, model,
+sha256(text))`, so re-indexing an unchanged document embeds nothing and
+switching models never serves stale vectors. `GET /health` reports the
+cache's hit and miss counters.
 
 ## Exposing the API
 
@@ -144,10 +176,15 @@ src/ragsvc/
   __main__.py              `recallmcp` / `python -m ragsvc`: serve the API
   api.py                   FastAPI application
   config.py                Typed RAG_ settings: providers, models, retrieval, API
+  embeddings/
+    base.py                EmbeddingProvider protocol and EmbeddingError
+    hashing.py             Deterministic feature-hashing embedder (tests, demo)
+    sentence_transformer.py  Lazily loaded sentence-transformers embedder
+    cache.py               SQLite embedding cache and the cached wrapper
   core/
     document_loader.py     Document text extraction
     text_splitter.py       Text chunking
-    embeddings.py          Sentence-transformers embeddings
+    embeddings.py          Process-wide embedding provider built from settings
     vector_store.py        FAISS index
     bm25_index.py          BM25 index
     retriever.py           Hybrid and recursive retrieval
@@ -169,8 +206,19 @@ uv run pytest                                        # tests
 uv run pre-commit install                            # run the checks on every commit
 ```
 
-Tests run without network access, model downloads or API keys. GitHub
-Actions runs lint, type check and tests on every push and pull request.
+Tests run without network access, model downloads or API keys: the
+fixtures in `tests/conftest.py` install hermetic settings with the hash
+embedder and the embedding cache disabled. GitHub Actions runs lint, type
+check and tests on every push and pull request.
+
+## Design notes
+
+- The hash embedder is the default for tests and demos rather than a mocked
+  model: it exercises the real ingest, index and search path with vectors
+  that are identical on every machine, so retrieval assertions can be exact.
+- The embedding cache lives in SQLite (one file, standard library only)
+  and is keyed by provider and model as well as text, so changing
+  `RAG_EMBED_MODEL_NAME` can never serve vectors from the old model.
 
 ## Known limitations
 

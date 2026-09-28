@@ -6,13 +6,9 @@ import pytest
 
 import ragsvc.core.ingest as ingest
 from ragsvc.core.bm25_index import bm25_manager
+from ragsvc.core.embeddings import encode_query, get_embedder
 from ragsvc.core.ingest import SourceFile, ingest_files
 from ragsvc.core.vector_store import vector_store
-
-
-def fake_encode_texts(texts, show_progress=False):
-    rng = np.random.default_rng(len(texts))
-    return rng.random((len(texts), 8), dtype=np.float32)
 
 
 def unit_vectors(count: int, dimension: int = 8) -> np.ndarray:
@@ -23,8 +19,8 @@ def unit_vectors(count: int, dimension: int = 8) -> np.ndarray:
 
 
 @pytest.fixture(autouse=True)
-def isolated_indexes(monkeypatch):
-    monkeypatch.setattr(ingest, "encode_texts", fake_encode_texts)
+def isolated_indexes():
+    """Each test starts and ends with empty indexes; embeddings come from the hash provider."""
     vector_store.clear()
     bm25_manager.clear()
     yield
@@ -65,6 +61,20 @@ def test_ingest_builds_both_indexes_with_source_metadata(tmp_path: Path):
 
     hits = bm25_manager.search("BM25 keyword", top_k=1)
     assert hits and hits[0]["id"] == "doc_2_chunk_0"
+
+
+def test_ingest_with_the_hash_embedder_makes_chunks_searchable_end_to_end(tmp_path: Path):
+    """No stubs: extract, chunk, embed with the hash provider, index, then search."""
+    seed_knowledge_base(tmp_path)
+
+    query = encode_query("exact keyword retrieval with BM25")
+    docs, ids, metas = vector_store.search(query, k=2)
+
+    assert query.shape == (1, get_embedder().dimension)
+    assert ids[0] == "doc_2_chunk_0"
+    assert docs[0] == "BM25 supports exact keyword retrieval."
+    assert metas[0] == {"source": "bm25.md", "doc_id": "doc_2"}
+    assert bm25_manager.search("exact keyword retrieval with BM25", top_k=1)[0]["id"] == ids[0]
 
 
 def test_ingest_reports_failures_without_aborting_the_batch(tmp_path: Path):

@@ -17,6 +17,7 @@ the variable, not later inside a request.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Annotated, Literal, get_args
 
 import requests
@@ -31,6 +32,14 @@ Provider = Literal["ollama", "openai"]
 PROVIDER_CHOICES: tuple[Provider, ...] = get_args(Provider)
 
 RerankMethod = Literal["cross_encoder", "llm", "none"]
+
+# "sentence-transformers": a neural model from the Hugging Face Hub (the
+# production default). "hash": deterministic feature hashing with no model,
+# used by the tests and the demo; see ragsvc.embeddings.
+EmbeddingProviderName = Literal["hash", "sentence-transformers"]
+EMBEDDING_PROVIDER_CHOICES: tuple[EmbeddingProviderName, ...] = get_args(EmbeddingProviderName)
+
+LogFormat = Literal["json", "text"]
 
 # Placeholder values such as ``Your_OPENAI_API_KEY`` left over from an example
 # file are treated as unset.
@@ -70,8 +79,24 @@ class Settings(BaseSettings):
     )
     openai_model: str = "gpt-4o-mini"
 
-    # --- Retrieval models (downloaded from the Hugging Face Hub on first use)
-    embed_model_name: str = "all-MiniLM-L6-v2"
+    # --- Embeddings ---------------------------------------------------------
+    embedding_provider: EmbeddingProviderName = Field(
+        default="sentence-transformers",
+        description="sentence-transformers (neural, downloaded on first use) or hash (deterministic).",
+    )
+    embed_model_name: str = Field(
+        default="all-MiniLM-L6-v2", description="Sentence-transformers model, from the Hugging Face Hub."
+    )
+    hash_embedding_dimension: int = Field(
+        default=256, ge=8, le=65536, description="Vector size of the hash provider."
+    )
+    embedding_cache_enabled: bool = Field(default=True, description="Keep computed vectors in SQLite.")
+    embedding_cache_path: Path = Field(
+        default=Path(".cache/recallmcp/embeddings.sqlite3"),
+        description="SQLite file of the embedding cache; created on first use.",
+    )
+
+    # --- Reranking (model downloaded from the Hugging Face Hub on first use)
     rerank_method: RerankMethod = "cross_encoder"
     rerank_model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
@@ -102,6 +127,20 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=50, ge=1)
     # When set, every /api request must carry "Authorization: Bearer <token>".
     api_token: SecretStr | None = None
+
+    # --- Logging ------------------------------------------------------------
+    log_level: str = Field(default="INFO", description="Root log level name (DEBUG, INFO, WARNING, ...).")
+    log_format: LogFormat = Field(default="json", description="json: one object per line; text: readable.")
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        name = value.strip().upper()
+        if name not in logging.getLevelNamesMapping():
+            raise ValueError(f"unknown log level {value!r}")
+        return name
 
     @field_validator("cors_allow_origins", mode="before")
     @classmethod

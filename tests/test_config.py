@@ -15,8 +15,13 @@ def test_defaults_are_local_and_need_no_credentials():
     assert settings.ollama_base_url == "http://localhost:11434"
     assert settings.openai_api_key is None and not settings.openai_configured
     assert settings.openai_base_url == "https://api.openai.com/v1"
+    assert settings.embedding_provider == "sentence-transformers"
     assert settings.embed_model_name == "all-MiniLM-L6-v2"
+    assert settings.hash_embedding_dimension == 256
+    assert settings.embedding_cache_enabled is True
+    assert settings.embedding_cache_path == Path(".cache/recallmcp/embeddings.sqlite3")
     assert settings.rerank_method == "cross_encoder"
+    assert (settings.log_level, settings.log_format) == ("INFO", "json")
     assert (settings.chunk_size, settings.chunk_overlap, settings.hybrid_alpha) == (400, 40, 0.7)
     assert settings.api_host == "127.0.0.1"
     assert settings.api_port is None
@@ -35,10 +40,21 @@ def test_rag_prefixed_environment_variables_are_read(monkeypatch):
     monkeypatch.setenv("RAG_API_PORT", "8080")
     monkeypatch.setenv("RAG_API_TOKEN", "s3cret")
     monkeypatch.setenv("RAG_OLLAMA_BASE_URL", "http://ollama.internal:11434/")
+    monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "hash")
+    monkeypatch.setenv("RAG_HASH_EMBEDDING_DIMENSION", "32")
+    monkeypatch.setenv("RAG_EMBEDDING_CACHE_ENABLED", "false")
+    monkeypatch.setenv("RAG_EMBEDDING_CACHE_PATH", "/tmp/recallmcp-test/emb.sqlite3")
+    monkeypatch.setenv("RAG_LOG_LEVEL", "debug")
+    monkeypatch.setenv("RAG_LOG_FORMAT", "text")
 
     settings = Settings(_env_file=None)
 
     assert (settings.chunk_size, settings.chunk_overlap, settings.hybrid_alpha) == (120, 12, 0.25)
+    assert settings.embedding_provider == "hash"
+    assert settings.hash_embedding_dimension == 32
+    assert settings.embedding_cache_enabled is False
+    assert settings.embedding_cache_path == Path("/tmp/recallmcp-test/emb.sqlite3")
+    assert (settings.log_level, settings.log_format) == ("DEBUG", "text")
     assert settings.llm_provider == "openai"
     assert settings.rerank_method == "none"
     assert settings.api_port == 8080
@@ -103,6 +119,10 @@ def test_dotenv_file_in_the_working_directory_is_read_below_the_environment(tmp_
         ({"chunk_size": 100, "chunk_overlap": 100}, "chunk_overlap"),
         ({"api_port": 70000}, "api_port"),
         ({"max_upload_mb": 0}, "max_upload_mb"),
+        ({"embedding_provider": "openai"}, "embedding_provider"),
+        ({"hash_embedding_dimension": 4}, "hash_embedding_dimension"),
+        ({"log_level": "LOUD"}, "log_level"),
+        ({"log_format": "xml"}, "log_format"),
     ],
 )
 def test_invalid_values_are_rejected_on_load_with_the_field_named(overrides, message):

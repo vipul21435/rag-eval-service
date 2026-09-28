@@ -8,6 +8,14 @@ restarts at 0.1.0.
 
 ### Added
 
+- `ragsvc.embeddings`: pluggable embedding providers behind an
+  `EmbeddingProvider` protocol. `SentenceTransformerEmbedder` (the default)
+  imports and loads its model on first use; `HashEmbedder` is deterministic
+  feature hashing of word unigrams and bigrams (no model, no download) used
+  by the tests and the demo; `EmbeddingCache` keeps vectors in SQLite keyed
+  by provider, model and text hash, with hit and miss counters. Selected
+  with `RAG_EMBEDDING_PROVIDER`, `RAG_HASH_EMBEDDING_DIMENSION`,
+  `RAG_EMBEDDING_CACHE_ENABLED` and `RAG_EMBEDDING_CACHE_PATH`.
 - `core/ingest.py`: a typed ingestion pipeline (extract, chunk, embed, index)
   that returns a structured per-file report and is shared by every entry point.
 - `pyproject.toml` with a committed `uv.lock` on Python 3.12; torch comes from
