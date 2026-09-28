@@ -174,7 +174,7 @@ protocol messages.
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `ingest_document` | `path` (relative to `RAG_MCP_DOCUMENT_ROOT`, or absolute under it) | `{status, file, chunks, total_chunks}`; replaces the knowledge base like `/api/upload` |
+| `ingest_document` | `path`: one path or a list of paths (relative to `RAG_MCP_DOCUMENT_ROOT`, or absolute under it) | `{status, files: [{file, chunks, error}], total_chunks}`; the named files replace the knowledge base, like one multi-file `/api/upload` request. `status` is `partial` when a file failed but others were indexed; a tool error when none was |
 | `search` | `query`, optional `top_k` (1-50, default `RAG_RERANK_TOP_K`) | `{query, results: [{id, score, content, source, doc_id}]}`, best first |
 | `list_documents` | none | `{documents: [{doc_id, source, chunks}], total_chunks}` |
 | `health` | none | The `GET /health` body: version, providers, index, embedding cache counters |
@@ -542,7 +542,8 @@ running container.
   extra for real semantic retrieval.
 - PDF extraction reads the text layer; there is no OCR.
 - The indexes live in process memory and are rebuilt on every upload; one
-  upload or `ingest_document` call replaces the whole knowledge base, and
+  upload or `ingest_document` call (with as many files as it names)
+  replaces the whole knowledge base, and
   the API and the MCP server each hold their own when run as separate
   processes.
 - Hosted model and web-search providers send the query to third parties;

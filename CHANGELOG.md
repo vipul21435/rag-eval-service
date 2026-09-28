@@ -11,7 +11,8 @@ restarts at 0.1.0.
 - An MCP server (`ragsvc.mcp_server`, console script `recallmcp-mcp`) on the
   official `mcp` package with the stdio transport, exposing
   `ingest_document`, `search`, `list_documents` and `health` over the same
-  core and settings as the API. `ingest_document` only reads files under
+  core and settings as the API. `ingest_document` takes one path or a list
+  of paths, like a multi-file `/api/upload`, only reads files under
   `RAG_MCP_DOCUMENT_ROOT` and honours `RAG_MAX_UPLOAD_MB`; anticipated
   failures are tool errors. `in_process_session` gives tests a client
   session over memory streams, and `examples/mcp_latency.py` measures the

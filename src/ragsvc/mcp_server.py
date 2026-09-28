@@ -50,9 +50,10 @@ REPLACES_INDEX = ToolAnnotations(
     read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False
 )
 INSTRUCTIONS = (
-    "Local document retrieval. Call ingest_document with a path under the document root "
-    "to (re)build the knowledge base from that file, then search for scored chunks. "
-    "list_documents shows what is indexed and health reports the providers and index size."
+    "Local document retrieval. Call ingest_document with one path or a list of paths under "
+    "the document root to (re)build the knowledge base from those files, then search for "
+    "scored chunks. list_documents shows what is indexed and health reports the providers "
+    "and index size."
 )
 
 
@@ -110,20 +111,30 @@ def build_server(settings: Settings | None = None) -> MCPServer[None]:
     server: MCPServer[None] = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS, version=__version__)
 
     @server.tool(
-        description="Index one document under the document root, replacing the knowledge base.",
+        description=(
+            "Index one document, or a list of documents, under the document root, replacing "
+            "the knowledge base with them."
+        ),
         annotations=REPLACES_INDEX,
     )
-    async def ingest_document(path: str) -> dict[str, Any]:
-        target = resolve_document(path, active)
-        report = await anyio.to_thread.run_sync(ingest_files, [SourceFile(path=target, name=target.name)])
-        result = report.files[0]
-        if not result.ok:
-            raise ToolError(f"{target.name}: {result.error}")
-        logger.info("MCP ingest of %s: %d chunk(s)", target.name, result.chunks)
+    async def ingest_document(path: str | list[str]) -> dict[str, Any]:
+        paths = [path] if isinstance(path, str) else list(path)
+        if not paths:
+            raise ToolError("path must name at least one file")
+        targets = [resolve_document(item, active) for item in paths]
+        sources = [SourceFile(path=target, name=target.name) for target in targets]
+        report = await anyio.to_thread.run_sync(ingest_files, sources)
+        failures = [f"{result.name}: {result.error}" for result in report.files if not result.ok]
+        if report.total_chunks == 0:
+            # Nothing was indexed, so the previous knowledge base is still in place.
+            raise ToolError("; ".join(failures))
+        logger.info("MCP ingest of %d file(s): %d chunk(s)", len(sources), report.total_chunks)
         return {
-            "status": "success",
-            "file": target.name,
-            "chunks": result.chunks,
+            "status": "success" if not failures else "partial",
+            "files": [
+                {"file": result.name, "chunks": result.chunks, "error": result.error}
+                for result in report.files
+            ],
             "total_chunks": report.total_chunks,
         }
 

@@ -106,7 +106,11 @@ async def test_ingest_then_search_and_list_over_the_session(docs: Path):
         found = payload(await session.call_tool("search", {"query": "exact keyword retrieval", "top_k": 1}))
         listed = payload(await session.call_tool("list_documents"))
 
-    assert ingested == {"status": "success", "file": "bm25.md", "chunks": 1, "total_chunks": 1}
+    assert ingested == {
+        "status": "success",
+        "files": [{"file": "bm25.md", "chunks": 1, "error": None}],
+        "total_chunks": 1,
+    }
     assert found["query"] == "exact keyword retrieval"
     (hit,) = found["results"]
     assert hit["id"] == "doc_1_chunk_0"
@@ -125,6 +129,46 @@ async def test_ingest_replaces_the_knowledge_base(docs: Path):
         listed = payload(await session.call_tool("list_documents"))
 
     assert [doc["source"] for doc in listed["documents"]] == ["faiss.md"]
+
+
+async def test_ingest_accepts_a_list_of_paths_like_the_upload_endpoint(docs: Path):
+    server = build_server(make_settings(mcp_document_root=docs, rerank_method="none"))
+    async with in_process_session(server) as session:
+        ingested = payload(await session.call_tool("ingest_document", {"path": ["bm25.md", "faiss.md"]}))
+        listed = payload(await session.call_tool("list_documents"))
+        partial = payload(await session.call_tool("ingest_document", {"path": ["empty.md", "bm25.md"]}))
+        after_partial = payload(await session.call_tool("list_documents"))
+        nothing = await session.call_tool("ingest_document", {"path": []})
+        all_failed = await session.call_tool("ingest_document", {"path": ["empty.md", "nope.md"]})
+        kept = payload(await session.call_tool("list_documents"))
+
+    assert ingested == {
+        "status": "success",
+        "files": [
+            {"file": "bm25.md", "chunks": 1, "error": None},
+            {"file": "faiss.md", "chunks": 1, "error": None},
+        ],
+        "total_chunks": 2,
+    }
+    assert listed == {
+        "documents": [
+            {"doc_id": "doc_1", "source": "bm25.md", "chunks": 1},
+            {"doc_id": "doc_2", "source": "faiss.md", "chunks": 1},
+        ],
+        "total_chunks": 2,
+    }
+    # One bad file does not abort the batch: the good one is indexed and the failure is reported.
+    assert partial["status"] == "partial"
+    assert partial["files"][0] == {
+        "file": "empty.md",
+        "chunks": 0,
+        "error": "document is empty or has no extractable text",
+    }
+    assert [doc["source"] for doc in after_partial["documents"]] == ["bm25.md"]
+    assert error_text(nothing) == "path must name at least one file"
+    # A missing file fails path resolution before anything is ingested, so the index is kept.
+    assert "is not a file under" in error_text(all_failed)
+    assert kept == after_partial
 
 
 async def test_health_tool_matches_the_http_health_endpoint(docs: Path):
