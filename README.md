@@ -114,7 +114,7 @@ uv run recallmcp    # serve the API on http://127.0.0.1:17995
 ```
 
 `make install` includes the `neural` extra (sentence-transformers and
-torch: the virtualenv measures 1.1 GB with it and 313 MB without). To
+torch: the virtualenv measures 1057 MB with it and 270 MB without). To
 stay lean run `uv sync --locked --extra documents --dev` instead and serve
 with `RAG_EMBEDDING_PROVIDER=hash RAG_RERANK_METHOD=none`. The demo pins
 those two settings in `examples/demo.py` and the tests build their own
