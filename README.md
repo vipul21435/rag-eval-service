@@ -55,7 +55,10 @@ Fork work only (`git log --author=vipul21435@iiitd.ac.in`):
   `502` for provider failures.
 - Local-first LLM configuration: a running Ollama is auto-detected and any
   OpenAI-compatible endpoint works behind environment variables.
-- BM25 tokenization with a regex instead of jieba; English-only code,
+- BM25 tokenization with a regex instead of jieba, and a dependency-free
+  recursive character splitter: importing `langchain-text-splitters`
+  loaded torch whenever the `neural` extra was installed and made a
+  fresh-clone `make demo` take 102 s instead of 10 s. English-only code,
   prompts and docs.
 - A digest-pinned, non-root, two-stage `Dockerfile`, a `docker-compose.yml`
   with a `/health` healthcheck, and GitHub Actions running ruff, strict
@@ -247,8 +250,9 @@ about retrieval quality, which the hash embedder does not have.
 | Query latency, first run of each query | `make demo` | p50 0.77 ms over 3 queries |
 | Query latency, query vector cached | `make demo` | p50 0.08 ms, p95 0.10 ms over 57 runs |
 | Whole demo, wall clock | `time make demo` | 9.2 s (of which `uv run` start-up and imports are most) |
-| Test suite | `uv run pytest --cov=ragsvc` | 171 tests in 1.9 s, 86% line coverage |
-| Container image | `docker build --no-cache -t recallmcp:dev .` | 102 s from an empty layer cache (base image already pulled); 105 MB image |
+| Test suite | `uv run pytest --cov=ragsvc` | 171 tests in 1.2 s, 85% line coverage |
+| Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 2 s (warm uv cache), 10 s, 9 s |
+| Container image | `docker build -t recallmcp:dev .` | 93 MB image; 60 s with a warm layer cache, 102 s from an empty one (base image already pulled) |
 
 ## Design decisions
 
