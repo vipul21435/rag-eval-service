@@ -2,10 +2,11 @@ Forked from https://github.com/weiwill88/Local_Pdf_Chat_RAG.
 
 # RecallMCP
 
-A local-first retrieval service: a FastAPI API over pluggable embeddings,
-FAISS + BM25 hybrid retrieval and optional cross-encoder reranking, with an
-SQLite embedding cache, health and readiness probes, request ids and JSON
-access logs. Everything runs on CPU. The deterministic hash embedder needs
+A local-first retrieval service with two interfaces over one core: a
+FastAPI API and an MCP server (stdio) over pluggable embeddings, FAISS +
+BM25 hybrid retrieval and optional cross-encoder reranking, with an SQLite
+embedding cache, health and readiness probes, request ids and JSON access
+logs. Everything runs on CPU. The deterministic hash embedder needs
 no model download, so the tests, the demo and the container image work
 offline; the sentence-transformers embedder is an opt-in extra. Answer
 generation uses a local Ollama server or any OpenAI-compatible endpoint
@@ -20,8 +21,8 @@ This repository is a fork of
 (MIT, Will Wei), an educational RAG reference implementation with a Gradio
 UI. The upstream pipeline (document loading, chunking, embeddings, FAISS,
 BM25, hybrid merge, reranking, generation) is kept and reworked into a
-service that can be measured: the UI is gone and the API is the only
-interface. [CHANGELOG.md](CHANGELOG.md) lists every change relative to
+service that can be measured: the UI is gone; the HTTP API and the MCP
+server are the interfaces. [CHANGELOG.md](CHANGELOG.md) lists every change relative to
 upstream.
 
 ## What I built on top
@@ -41,6 +42,13 @@ Fork work only (`git log --author=vipul21435@iiitd.ac.in`):
   configured reranker, no LLM) shared by the demo and the recursive
   retriever, and `make demo`: three bundled documents, a re-index that
   shows the cache working, three timed queries; under ten seconds, offline.
+- An MCP server (`recallmcp-mcp`, the official `mcp` package, stdio
+  transport) exposing `ingest_document`, `search`, `list_documents` and
+  `health` as tools over the same core and `RAG_` settings as the API;
+  ingestion is confined to `RAG_MCP_DOCUMENT_ROOT`, failures come back as
+  tool errors the agent can read, and the tests drive it through an
+  in-process client session. A warm `search` call is 0.5 ms in-process and
+  0.9 ms over stdio (`examples/mcp_latency.py`).
 - Operations endpoints and logs: `GET /health` (version, provider names,
   index size, cache counters) and `GET /ready`; an `X-Request-ID` on every
   response that every log record of the request carries; JSON access logs
@@ -73,6 +81,11 @@ flowchart LR
         ASK["POST /api/ask"]
         HP["GET /health, /ready, /api/status"]
     end
+    subgraph MCP["MCP server (ragsvc.mcp_server, stdio)"]
+        TI["ingest_document"]
+        TS["search"]
+        TH["list_documents, health"]
+    end
     subgraph Ingest["Write path (core.ingest)"]
         LOAD["Loader: PDF, TXT, MD, DOCX, PPTX, XLSX"] --> SPLIT["Chunker"]
         SPLIT --> EMB["Embedder"]
@@ -90,8 +103,13 @@ flowchart LR
     EMB <--> CACHE
     QE <--> CACHE
     UP --> LOAD
+    TI --> LOAD
     ASK --> QE
     ASK --> Q2
+    TS --> QE
+    TS --> Q2
+    RR --> TS
+    TH -.-> FAISS
     FAISS -.-> DS
     BM25 -.-> SS
     RR --> GEN["Context + prompt -> Ollama or OpenAI-compatible LLM"]
@@ -109,8 +127,9 @@ itself. Five commands from a fresh clone:
 git clone https://github.com/vipul21435/recallmcp.git && cd recallmcp
 make install        # uv sync: locked dependencies, all extras and the dev tools
 make demo           # offline: hash embedder, 3 sample documents, 3 timed queries
-make test           # 174 tests with coverage; no network, models or credentials
+make test           # 184 tests with coverage; no network, models or credentials
 uv run recallmcp    # serve the API on http://127.0.0.1:17995
+uv run recallmcp-mcp   # serve the same knowledge base as MCP tools on stdio
 ```
 
 `make install` includes the `neural` extra (sentence-transformers and
@@ -144,6 +163,69 @@ with `RAG_EMBEDDING_PROVIDER=sentence-transformers` and
 its network namespace; compose publishes the port on `127.0.0.1` only. Set
 `RAG_API_TOKEN` before exposing it further.
 
+## MCP server
+
+`recallmcp-mcp` serves the knowledge base to agents over the Model Context
+Protocol on standard input and output, built on the official `mcp`
+package (2.x). It shares the `ragsvc` core and the `RAG_` settings with
+the HTTP API: the same ingestion pipeline, the same `search_chunks` read
+path, the same health snapshot. Logs go to stderr; stdout carries only
+protocol messages.
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `ingest_document` | `path` (relative to `RAG_MCP_DOCUMENT_ROOT`, or absolute under it) | `{status, file, chunks, total_chunks}`; replaces the knowledge base like `/api/upload` |
+| `search` | `query`, optional `top_k` (1-50, default `RAG_RERANK_TOP_K`) | `{query, results: [{id, score, content, source, doc_id}]}`, best first |
+| `list_documents` | none | `{documents: [{doc_id, source, chunks}], total_chunks}` |
+| `health` | none | The `GET /health` body: version, providers, index, embedding cache counters |
+
+A path outside the document root, a missing file, an unsupported format, a
+file over `RAG_MAX_UPLOAD_MB`, an empty query or a search on an empty
+knowledge base returns an MCP tool error (`isError: true`) whose text
+names the problem, so an agent can correct its call. Client configuration
+for Claude Desktop, Claude Code, Cursor or any stdio MCP client (adjust the
+path to your clone):
+
+```json
+{
+  "mcpServers": {
+    "recallmcp": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/recallmcp", "recallmcp-mcp"],
+      "env": {
+        "RAG_EMBEDDING_PROVIDER": "hash",
+        "RAG_RERANK_METHOD": "none",
+        "RAG_MCP_DOCUMENT_ROOT": "/path/to/your/documents"
+      }
+    }
+  }
+}
+```
+
+Drop the two provider variables to use the neural embedder and the
+cross-encoder (needs the `neural` extra). `uv run python
+examples/mcp_latency.py` measures the tool calls, first through an
+in-process client session on memory streams and then against a real
+`recallmcp-mcp` child process over stdio:
+
+```text
+in-process: initialize 7.97 ms
+in-process: ingest_document(hybrid-retrieval.md) 35.81 ms
+in-process: search first 51.92 ms, p50 0.48 ms, p95 0.75 ms over 50 calls
+in-process: list_documents first 0.67 ms, p50 0.33 ms, p95 0.89 ms over 50 calls
+in-process: health first 0.76 ms, p50 0.37 ms, p95 0.76 ms over 50 calls
+stdio: spawn + initialize 666 ms
+stdio: ingest_document(hybrid-retrieval.md) 3.79 ms
+stdio: search first 2.81 ms, p50 0.88 ms, p95 1.02 ms over 20 calls
+stdio: list_documents first 1.10 ms, p50 0.68 ms, p95 0.98 ms over 20 calls
+stdio: health first 1.15 ms, p50 0.73 ms, p95 0.84 ms over 20 calls
+```
+
+The first in-process `search` pays for importing the retrieval modules;
+the stdio process has already paid it by the time it answers `initialize`,
+which is dominated by interpreter start-up. The embedding cache is shared
+between the two halves, so the stdio ingest is a cache hit.
+
 ## Reference
 
 ### Commands
@@ -151,6 +233,8 @@ its network namespace; compose publishes the port on `127.0.0.1` only. Set
 | Command | What it does |
 | --- | --- |
 | `uv run recallmcp` (or `python -m ragsvc`) | Serve the API on `RAG_API_HOST:RAG_API_PORT` (default `127.0.0.1`, first free port in `17995-17999`) |
+| `uv run recallmcp-mcp` (or `python -m ragsvc.mcp_server`) | Serve the MCP tools on stdio; documents are read from `RAG_MCP_DOCUMENT_ROOT` |
+| `uv run python examples/mcp_latency.py` | Time the four tools in-process and over a real stdio child process (offline, hash embedder) |
 | `make demo` | Run `examples/demo.py`: ingest `examples/docs/`, re-ingest, three timed queries, cache counters |
 | `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is what GitHub Actions runs |
 | `make docker-build`, `make docker-up` | Build `recallmcp:dev`; start it with compose |
@@ -187,6 +271,11 @@ curl -s -X POST -H 'Content-Type: application/json' \
   one hybrid round plus the configured reranker, no LLM.
 - `ragsvc.embeddings.build_embedder(settings)`, `HashEmbedder`,
   `SentenceTransformerEmbedder`, `EmbeddingCache`, `CachedEmbedder`.
+- `ragsvc.mcp_server.build_server(settings=None) -> MCPServer`: the MCP
+  server with its four tools, same settings semantics as `create_app`;
+  `in_process_session(server)` is an async context manager yielding an
+  initialized `mcp.ClientSession` over memory streams (what the tests and
+  the latency example use).
 
 ## Sample output
 
@@ -252,9 +341,11 @@ about retrieval quality, which the hash embedder does not have.
 | Query latency, first run of each query | `make demo` | p50 0.53 ms over 3 queries (the very first query pays 5 ms of lazy set-up) |
 | Query latency, query vector cached | `make demo` | p50 0.08 ms, p95 0.09 ms over 57 runs |
 | Whole demo, wall clock | `time make demo` | 0.5 s with a warm virtualenv (interpreter start-up and imports are most of it) |
-| Test suite | `uv run pytest --cov=ragsvc` | 174 tests in 2.3 s (one runs the demo in a subprocess), 85% line coverage |
+| MCP tool call, in-process client session | `uv run python examples/mcp_latency.py` | `search` p50 0.48 ms, p95 0.75 ms over 50 calls; `list_documents` p50 0.33 ms; `health` p50 0.37 ms; `ingest_document` of an 8-chunk file 36 ms |
+| MCP tool call over stdio to a child process | `uv run python examples/mcp_latency.py` | `search` p50 0.88 ms, p95 1.02 ms over 20 calls; `health` p50 0.73 ms; spawn plus `initialize` 666 ms; the whole script 1.9 s |
+| Test suite | `uv run pytest --cov=ragsvc` | 184 tests in 2.7 s (one runs the demo in a subprocess), 86% line coverage |
 | Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 1.8 s (warm uv cache, 1.0 GB virtualenv), 3.2 s for the first `make demo` (uv builds the project; 0.4 s on the second run), 4.3 s |
-| Container image | `docker build -t recallmcp:dev .` | 93 MB compressed content (`docker image inspect --format '{{.Size}}'` reports about 93.5 million bytes; two builds differed by a few hundred), 406 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
+| Container image | `docker build -t recallmcp:dev .` | 96 MB compressed content (`docker image inspect --format '{{.Size}}'` reports about 96.1 million bytes, 3 MB of it the `mcp` package), 419 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
 
 ## Design decisions
 
@@ -285,6 +376,13 @@ about retrieval quality, which the hash embedder does not have.
 - **`search_chunks` is separate from `answer_question`.** Retrieval with
   scores and no LLM is what a demo, a benchmark and an MCP tool need; the
   generation path is layered on top rather than mixed in.
+- **The MCP server is a second interface, not a second service.** Its
+  tools call the same `ingest_files`, `search_chunks` and health snapshot
+  the API does and read the same settings, so there is one behaviour to
+  test and document. Ingestion is confined to `RAG_MCP_DOCUMENT_ROOT`
+  because the caller is an agent: it should not be able to index any file
+  the process can read. Anticipated failures are `ToolError`s, which reach
+  the model as readable text instead of a generic crash.
 
 ## Configuration
 
@@ -311,6 +409,7 @@ message naming the variable. Every variable is optional; see
 | `RAG_CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
 | `RAG_MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
 | `RAG_API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
+| `RAG_MCP_DOCUMENT_ROOT` | Directory the MCP `ingest_document` tool may read files from (the working directory) |
 | `RAG_LOG_LEVEL`, `RAG_LOG_FORMAT` | Root log level (`INFO`) and `json` (default, one object per line) or `text` |
 
 ### Embeddings
@@ -371,6 +470,7 @@ src/ragsvc/
   __init__.py              Package version
   __main__.py              `recallmcp` / `python -m ragsvc`: serve the API
   api.py                   FastAPI application: upload, ask, status, health, ready
+  mcp_server.py            `recallmcp-mcp`: MCP tools over stdio and the in-process test session
   config.py                Typed RAG_ settings: providers, models, retrieval, API, logging
   middleware.py            X-Request-ID middleware and the access log
   logging_setup.py         JSON / text log handler carrying the request id
@@ -393,8 +493,9 @@ src/ragsvc/
   utils/                   HTTP session and port helpers
 examples/
   demo.py                  `make demo`
+  mcp_latency.py           MCP tool-call latency, in-process and over stdio
   docs/                    Three sample Markdown documents
-tests/                     174 tests that need no network access or credentials
+tests/                     184 tests that need no network access or credentials
 Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 ```
 
@@ -421,7 +522,9 @@ file and checks `/health` and `/ready` on a running container.
   extra for real semantic retrieval.
 - PDF extraction reads the text layer; there is no OCR.
 - The indexes live in process memory and are rebuilt on every upload; one
-  upload replaces the whole knowledge base.
+  upload or `ingest_document` call replaces the whole knowledge base, and
+  the API and the MCP server each hold their own when run as separate
+  processes.
 - Hosted model and web-search providers send the query to third parties;
   review your data boundary before enabling them.
 - There is no retrieval quality evaluation yet; the numbers above are
@@ -438,8 +541,6 @@ file and checks `/health` and `/ready` on a running container.
   for the embedding cache.
 - Reciprocal rank fusion as an alternative to the weighted hybrid merge,
   and a query cache in front of `search_chunks`.
-- An MCP server exposing `search` and `ingest` as tools over the same
-  service, so agents can use the knowledge base directly.
 - Agent tasks with pytest graders that score an agent's answers against
   the labelled query set.
 - A Typer CLI (`recallmcp ingest`, `recallmcp search`, `recallmcp serve`)
