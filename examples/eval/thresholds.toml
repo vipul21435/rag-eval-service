@@ -1,0 +1,14 @@
+# Minimum macro-averaged scores over golden.v1.jsonl for the hash embedder,
+# set just under the measured values (README, Benchmarks). Read by
+# tests/test_eval_gate.py and by `make eval`, which fail when a mean drops below.
+k = 3
+
+[dense]
+recall = 0.90
+mrr = 0.85
+ndcg = 0.85
+
+[hybrid]
+recall = 0.95
+mrr = 0.95
+ndcg = 0.95

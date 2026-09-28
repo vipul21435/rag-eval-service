@@ -1,7 +1,7 @@
 # Developer entry points. Everything runs through uv; `make install` first.
 UV ?= uv
 
-.PHONY: install lint format typecheck test demo mcp-latency ci docker-build docker-up
+.PHONY: install lint format typecheck test demo eval mcp-latency ci docker-build docker-up
 
 install:  ## Install Python 3.12, the locked dependencies, all extras and the dev tools
 	$(UV) sync --locked --all-extras --dev
@@ -22,6 +22,9 @@ test:  ## Test suite with coverage; needs no network, models or credentials
 
 demo:  ## Ingest the sample documents and run three queries; the script pins the hash embedder (offline)
 	$(UV) run python examples/demo.py
+
+eval:  ## Score the golden set in dense-only and hybrid mode; writes eval-reports/retrieval-eval.{json,md} (offline)
+	$(UV) run python examples/eval_retrieval.py
 
 mcp-latency:  ## Time the MCP tools in-process and over a real stdio child process (offline)
 	$(UV) run python examples/mcp_latency.py

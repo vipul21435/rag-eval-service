@@ -1,0 +1,12 @@
+{"id": "q01", "query": "What key does the embedding cache use?", "relevant": ["embedding-cache.md"]}
+{"id": "q02", "query": "Where is the SQLite file with cached vectors stored by default?", "relevant": ["embedding-cache.md"]}
+{"id": "q03", "query": "How can I tell whether re-indexing is doing any work?", "relevant": ["embedding-cache.md"]}
+{"id": "q04", "query": "What happens to a corrupt cache row whose payload has the wrong dimension?", "relevant": ["embedding-cache.md"]}
+{"id": "q05", "query": "How are dense and BM25 scores combined?", "relevant": ["hybrid-retrieval.md"]}
+{"id": "q06", "query": "Which FAISS index types are used as the collection grows?", "relevant": ["hybrid-retrieval.md"]}
+{"id": "q07", "query": "Why are part numbers and rare identifiers still found?", "relevant": ["hybrid-retrieval.md"]}
+{"id": "q08", "query": "What does the cross-encoder reranker do after the merge?", "relevant": ["hybrid-retrieval.md"]}
+{"id": "q09", "query": "What does GET /ready return before documents are indexed?", "relevant": ["operations.md"]}
+{"id": "q10", "query": "How does the server handle the X-Request-ID header?", "relevant": ["operations.md"]}
+{"id": "q11", "query": "How do I expose the API to other hosts safely?", "relevant": ["operations.md"]}
+{"id": "q12", "query": "What user does the container run as and where does it keep its cache?", "relevant": ["operations.md"]}

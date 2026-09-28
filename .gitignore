@@ -32,3 +32,6 @@ output/playwright/
 # Tooling caches
 .ruff_cache/
 .mypy_cache/
+
+# make eval output
+eval-reports/
