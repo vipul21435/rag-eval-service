@@ -1,45 +1,48 @@
-"""
-向量存储 —— FAISS 向量索引管理
+"""Vector store: FAISS index management.
 
-学习要点：
-- FAISS (Facebook AI Similarity Search) 是高效的向量相似度检索库
-- IndexFlatL2: 暴力搜索，精确但慢。适合小数据集（<1万）
-- IndexIVFFlat: 倒排索引，先聚类再搜索。适合中等数据集
-- IndexIVFPQ: 乘积量化，牺牲精度换效率。适合大数据集（>10万）
-- 本项目根据向量数量自动选择最优索引类型
+FAISS index types trade accuracy for speed:
+
+- ``IndexFlatL2``: exhaustive, exact search; fine for small collections.
+- ``IndexIVFFlat``: clusters vectors first and searches a few clusters.
+- ``IndexIVFPQ``: adds product quantization for very large collections.
+
+``AutoFaissIndex`` picks one of them from the number of vectors.
 """
+
+from __future__ import annotations
 
 import logging
+from typing import Any
+
 import numpy as np
-from faiss import IndexFlatL2, IndexIVFFlat, IndexIVFPQ
+from faiss import Index, IndexFlatL2, IndexIVFFlat, IndexIVFPQ
+from numpy.typing import NDArray
+
+logger = logging.getLogger(__name__)
+
+Metadata = dict[str, Any]
+SearchResult = tuple[list[str], list[str], list[Metadata]]
 
 
 class AutoFaissIndex:
-    """
-    自动选择 FAISS 索引类型的封装类
+    """FAISS index wrapper that selects the index type from the dataset size."""
 
-    根据数据量自动选择最优索引类型：
-    - 小数据集（<1万）: FlatL2（精确搜索）
-    - 中等数据集（1万-10万）: IVFFlat（近似搜索）
-    - 大数据集（>10万）: IVFPQ（高效近似搜索）
-    """
-
-    def __init__(self, dimension=384):
+    def __init__(self, dimension: int = 384) -> None:
         self.dimension = dimension
-        self.index = None
-        self.index_type = None
-        self.nlist = None
-        self.m = None
-        self.nprobe = None
+        self.index: Index | None = None
+        self.index_type: str | None = None
+        self.nlist: int | None = None
+        self.m: int | None = None
+        self.nprobe: int | None = None
         self.small_dataset_threshold = 10_000
         self.medium_dataset_threshold = 100_000
 
     @property
-    def ntotal(self):
-        return self.index.ntotal if self.index else 0
+    def ntotal(self) -> int:
+        return int(self.index.ntotal) if self.index is not None else 0
 
-    def select_index_type(self, num_vectors):
-        """根据向量数量自动选择最优索引类型"""
+    def select_index_type(self, num_vectors: int) -> str:
+        """Create the index best suited to ``num_vectors`` and return its name."""
         if num_vectors <= self.small_dataset_threshold:
             self.index_type = "FlatL2"
             self.index = IndexFlatL2(self.dimension)
@@ -58,108 +61,117 @@ class AutoFaissIndex:
             self.index = IndexIVFPQ(quantizer, self.dimension, self.nlist, self.m, 8)
             self.nprobe = min(32, max(1, int(self.nlist * 0.05)))
 
-        logging.info(f"选择索引类型: {self.index_type}，向量数: {num_vectors}")
+        logger.info("Selected FAISS index type %s for %d vectors", self.index_type, num_vectors)
         return self.index_type
 
-    def train(self, vectors):
-        if self.index_type in ["IVFFlat", "IVFPQ"]:
-            self.index.train(vectors)
+    def _require_index(self) -> Index:
+        if self.index is None:
+            raise RuntimeError("select_index_type() must be called before using the index")
+        return self.index
 
-    def add(self, vectors):
-        if self.index_type in ["IVFFlat", "IVFPQ"] and not self.index.is_trained:
+    def train(self, vectors: NDArray[np.float32]) -> None:
+        if self.index_type in ("IVFFlat", "IVFPQ"):
+            self._require_index().train(vectors)
+
+    def add(self, vectors: NDArray[np.float32]) -> None:
+        index = self._require_index()
+        if self.index_type in ("IVFFlat", "IVFPQ") and not index.is_trained:
             self.train(vectors)
-        self.index.add(vectors)
+        index.add(vectors)
 
-    def search(self, query_vectors, k=5):
-        if self.index_type in ["IVFFlat", "IVFPQ"]:
-            self.index.nprobe = self.nprobe
-        return self.index.search(query_vectors, k)
+    def search(self, query_vectors: NDArray[np.float32], k: int = 5) -> tuple[NDArray[Any], NDArray[Any]]:
+        """Return (distances, indices) for the nearest ``k`` vectors of each query."""
+        index = self._require_index()
+        if self.index_type in ("IVFFlat", "IVFPQ") and self.nprobe is not None:
+            index.nprobe = self.nprobe
+        distances, indices = index.search(query_vectors, k)
+        return distances, indices
 
-    def get_index_info(self):
+    def get_index_info(self) -> dict[str, Any]:
         return {
-            "index_type": self.index_type, "dimension": self.dimension,
-            "nlist": self.nlist, "nprobe": self.nprobe, "size": self.ntotal
+            "index_type": self.index_type,
+            "dimension": self.dimension,
+            "nlist": self.nlist,
+            "nprobe": self.nprobe,
+            "size": self.ntotal,
         }
 
 
 class VectorStore:
-    """
-    向量存储管理器
+    """FAISS index plus the chunk texts and metadata it points at."""
 
-    封装 FAISS 索引及其关联的文档内容和元数据映射。
-    解决原代码中 4 个全局变量的管理问题。
-    """
+    def __init__(self) -> None:
+        self.index: AutoFaissIndex | None = None
+        self.contents_map: dict[str, str] = {}
+        self.metadatas_map: dict[str, Metadata] = {}
+        self.id_order: list[str] = []
 
-    def __init__(self):
-        self.index = None           # AutoFaissIndex 实例
-        self.contents_map = {}      # chunk_id -> 文本内容
-        self.metadatas_map = {}     # chunk_id -> 元数据
-        self.id_order = []          # 按顺序记录的 chunk_id 列表
+    def build_index(
+        self,
+        chunks: list[str],
+        chunk_ids: list[str],
+        metadatas: list[Metadata],
+        embeddings: NDArray[np.float32],
+    ) -> None:
+        """Build a fresh FAISS index over ``embeddings`` and record the chunk texts.
 
-    def build_index(self, chunks, chunk_ids, metadatas, embeddings):
+        Positions in ``chunks``, ``chunk_ids``, ``metadatas`` and ``embeddings``
+        must correspond; ``chunk_ids`` are the stable identifiers returned by
+        ``search``.
         """
-        构建 FAISS 索引
-
-        Args:
-            chunks: 文本片段列表
-            chunk_ids: 片段 ID 列表
-            metadatas: 元数据列表
-            embeddings: 向量数组 (numpy, float32)
-        """
-        dimension = embeddings.shape[1]
+        dimension = int(embeddings.shape[1])
         num_vectors = len(chunks)
 
         auto_index = AutoFaissIndex(dimension=dimension)
         auto_index.select_index_type(num_vectors)
 
-        for chunk_id, chunk, meta in zip(chunk_ids, chunks, metadatas):
+        for chunk_id, chunk, meta in zip(chunk_ids, chunks, metadatas, strict=True):
             self.contents_map[chunk_id] = chunk
             self.metadatas_map[chunk_id] = meta
             self.id_order.append(chunk_id)
 
         auto_index.add(embeddings)
         self.index = auto_index
-        logging.info(f"FAISS 索引构建完成，共 {self.index.ntotal} 个文本块，类型: {auto_index.index_type}")
+        logger.info("FAISS index built: %d chunks, type %s", auto_index.ntotal, auto_index.index_type)
 
-    def search(self, query_embedding, k=10):
-        """
-        搜索最相似的向量
-
-        Returns:
-            (docs, doc_ids, metadatas)
-        """
+    def search(self, query_embedding: NDArray[np.float32], k: int = 10) -> SearchResult:
+        """Return the ``k`` nearest chunks as ``(texts, chunk_ids, metadatas)``."""
         if self.index is None or self.index.ntotal == 0:
             return [], [], []
         try:
-            D, I = self.index.search(query_embedding, k=k)
-            docs, doc_ids, metadatas = [], [], []
-            for faiss_idx in I[0]:
-                if faiss_idx != -1 and faiss_idx < len(self.id_order):
-                    original_id = self.id_order[faiss_idx]
-                    if original_id in self.contents_map:
-                        docs.append(self.contents_map[original_id])
-                        doc_ids.append(original_id)
-                        metadatas.append(self.metadatas_map.get(original_id, {}))
-            return docs, doc_ids, metadatas
-        except Exception as e:
-            logging.error(f"FAISS 检索错误: {str(e)}")
+            _, indices = self.index.search(query_embedding, k=k)
+        except Exception as exc:  # noqa: BLE001 - FAISS raises plain RuntimeError
+            logger.error("FAISS search failed: %s", exc)
             return [], [], []
 
+        docs: list[str] = []
+        doc_ids: list[str] = []
+        metadatas: list[Metadata] = []
+        for faiss_idx in indices[0]:
+            if faiss_idx == -1 or faiss_idx >= len(self.id_order):
+                continue
+            chunk_id = self.id_order[faiss_idx]
+            if chunk_id in self.contents_map:
+                docs.append(self.contents_map[chunk_id])
+                doc_ids.append(chunk_id)
+                metadatas.append(self.metadatas_map.get(chunk_id, {}))
+        return docs, doc_ids, metadatas
+
     @property
-    def is_ready(self):
+    def is_ready(self) -> bool:
         return self.index is not None and self.index.ntotal > 0
 
     @property
-    def total_chunks(self):
+    def total_chunks(self) -> int:
         return self.index.ntotal if self.index is not None else 0
 
-    def clear(self):
+    def clear(self) -> None:
         self.index = None
         self.contents_map.clear()
         self.metadatas_map.clear()
         self.id_order.clear()
-        logging.info("向量存储已清空")
+        logger.info("Vector store cleared")
 
 
-# 模块级单例
+# Module-level singleton shared by the retriever and the ingestion pipeline.
 vector_store = VectorStore()

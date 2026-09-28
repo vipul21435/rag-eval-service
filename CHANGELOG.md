@@ -17,6 +17,15 @@ restarts at 0.1.0.
 
 - `POST /api/upload` reports chunk counts from the ingestion report instead of
   parsing the demo UI's status text.
+- Comments, docstrings, log messages and LLM prompts in `core/`, `features/`
+  and `utils/` are in English; the query-rewriting prompt now uses the
+  `NO_FURTHER_QUERY` sentinel and web search defaults to English results.
+- Conflict detection compares the set of numeric facts per source rather than
+  their order of mention, and no longer special-cases upstream sample text.
+
+### Fixed
+
+- `split_text(chunk_overlap=0)` used the configured default instead of zero.
 - Office-format parsers (DOCX, PPTX, Excel) are an optional `documents` extra.
 
 ### Removed

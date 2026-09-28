@@ -1,67 +1,73 @@
-"""
-BM25 稀疏检索索引 —— 基于关键词的传统检索
+"""BM25 index: sparse, keyword-based retrieval.
 
-学习要点：
-- BM25 (Best Matching 25) 是经典的信息检索算法
-- 与向量语义检索互补：语义检索擅长理解意图，BM25 擅长精确关键词匹配
-- 中文需要先分词（jieba），英文可直接按空格分
-- 两者混合使用（Hybrid Search）可以显著提升检索效果
+BM25 complements dense retrieval: embeddings capture intent, BM25 rewards
+exact term matches (identifiers, part numbers, rare words). The two are
+combined by ``core.retriever.hybrid_merge``.
 """
+
+from __future__ import annotations
 
 import logging
-import numpy as np
+from typing import TypedDict
+
 import jieba
+import numpy as np
 from rank_bm25 import BM25Okapi
+
+logger = logging.getLogger(__name__)
+
+
+class BM25Hit(TypedDict):
+    id: str
+    score: float
+    content: str
+
+
+def tokenize(text: str) -> list[str]:
+    """Tokenize ``text`` for BM25; jieba handles both CJK and space-delimited text."""
+    return list(jieba.cut(text))
 
 
 class BM25IndexManager:
-    """
-    BM25 检索索引管理器
+    """Build, search and clear a BM25 index over chunk texts."""
 
-    负责构建、搜索和管理 BM25 索引。
-    使用 jieba 分词以支持中文检索。
-    """
+    def __init__(self) -> None:
+        self.bm25_index: BM25Okapi | None = None
+        self.doc_mapping: dict[int, str] = {}
+        self.tokenized_corpus: list[list[str]] = []
+        self.raw_corpus: list[str] = []
 
-    def __init__(self):
-        self.bm25_index = None
-        self.doc_mapping = {}
-        self.tokenized_corpus = []
-        self.raw_corpus = []
-
-    def build_index(self, documents, doc_ids):
-        """构建 BM25 索引"""
-        self.raw_corpus = documents
-        self.doc_mapping = {i: doc_id for i, doc_id in enumerate(doc_ids)}
-        self.tokenized_corpus = [list(jieba.cut(doc)) for doc in documents]
+    def build_index(self, documents: list[str], doc_ids: list[str]) -> bool:
+        """Index ``documents``; ``doc_ids`` are returned by ``search``."""
+        self.raw_corpus = list(documents)
+        self.doc_mapping = dict(enumerate(doc_ids))
+        self.tokenized_corpus = [tokenize(doc) for doc in documents]
         self.bm25_index = BM25Okapi(self.tokenized_corpus)
-        logging.info(f"BM25 索引构建完成，共索引 {len(documents)} 个文档")
+        logger.info("BM25 index built over %d documents", len(documents))
         return True
 
-    def search(self, query, top_k=5):
-        """使用 BM25 检索相关文档"""
-        if not self.bm25_index:
+    def search(self, query: str, top_k: int = 5) -> list[BM25Hit]:
+        """Return up to ``top_k`` documents with a positive BM25 score, best first."""
+        if self.bm25_index is None:
             return []
 
-        tokenized_query = list(jieba.cut(query))
-        bm25_scores = self.bm25_index.get_scores(tokenized_query)
-        top_indices = np.argsort(bm25_scores)[-top_k:][::-1]
+        scores = self.bm25_index.get_scores(tokenize(query))
+        top_indices = np.argsort(scores)[-top_k:][::-1]
 
-        results = []
+        results: list[BM25Hit] = []
         for idx in top_indices:
-            if bm25_scores[idx] > 0:
-                results.append({
-                    'id': self.doc_mapping[idx],
-                    'score': float(bm25_scores[idx]),
-                    'content': self.raw_corpus[idx]
-                })
+            if scores[idx] > 0:
+                results.append(
+                    {"id": self.doc_mapping[int(idx)], "score": float(scores[idx]), "content": self.raw_corpus[idx]}
+                )
         return results
 
-    def clear(self):
+    def clear(self) -> None:
         self.bm25_index = None
         self.doc_mapping = {}
         self.tokenized_corpus = []
         self.raw_corpus = []
 
 
-# 模块级单例
+# Module-level singleton shared by the retriever and the ingestion pipeline.
 bm25_manager = BM25IndexManager()

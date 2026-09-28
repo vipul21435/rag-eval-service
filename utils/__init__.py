@@ -1,1 +1,1 @@
-# 工具模块
+"""Shared helpers (network session, port probe)."""

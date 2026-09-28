@@ -1,13 +1,12 @@
-"""
-RAG 核心处理模块
+"""Core RAG pipeline modules, listed in the order a request flows through them.
 
-学习路线（按 RAG 流水线顺序）：
-1. document_loader.py  → 理解文档如何被解析为纯文本
-2. text_splitter.py    → 理解长文本如何被切分为检索友好的片段
-3. embeddings.py       → 理解文本如何被映射到向量空间
-4. vector_store.py     → 理解 FAISS 如何存储和检索向量
-5. bm25_index.py       → 理解稀疏检索如何与密集检索互补
-6. retriever.py        → 理解混合检索策略的设计
-7. reranker.py         → 理解两阶段检索（recall + rerank）
-8. generator.py        → 理解 Prompt 构建和 LLM 调用
+1. document_loader.py  parse documents into plain text
+2. text_splitter.py    split long text into retrieval-sized chunks
+3. embeddings.py       map text into a vector space
+4. vector_store.py     store and search vectors with FAISS
+5. bm25_index.py       sparse keyword retrieval that complements dense search
+6. retriever.py        hybrid (dense + sparse) and recursive retrieval
+7. reranker.py         two-stage retrieval: recall, then rerank
+8. generator.py        prompt construction and LLM calls
+9. ingest.py           the write path: extract, chunk, embed, index
 """

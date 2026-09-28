@@ -1,1 +1,1 @@
-# 扩展功能模块
+"""Optional pipeline extensions: web search, conflict detection, thinking-chain formatting."""

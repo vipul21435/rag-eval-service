@@ -1,60 +1,49 @@
-"""
-向量化模型 —— 将文本映射到高维向量空间
+"""Embeddings: map text into a vector space with a sentence-transformers model.
 
-学习要点：
-- Embedding 将文本转换为固定维度的向量，使语义相似的文本在向量空间中距离更近
-- all-MiniLM-L6-v2 是英文优化模型（384维），中文可换用 text2vec-base-chinese
-- 首次运行时模型会自动下载（约 80MB），需要网络连接
+Semantically similar texts end up close together, which is what the FAISS
+index searches on. The default model is small, English-oriented and runs on
+CPU; it is downloaded from the Hugging Face Hub on first use.
 """
+
+from __future__ import annotations
 
 import logging
-import numpy as np
+from collections.abc import Sequence
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-# 模型选择说明：
-# - all-MiniLM-L6-v2: 英文优化，384维，轻量快速（默认）
-# - shibing624/text2vec-base-chinese: 中文优化
-# - BAAI/bge-small-zh-v1.5: 中文优化，性能更好
-EMBED_MODEL_NAME = 'all-MiniLM-L6-v2'
+import numpy as np
+from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
+
+# all-MiniLM-L6-v2: 384 dimensions, about 80 MB, fast on CPU.
+EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 @lru_cache(maxsize=1)
-def get_embed_model():
-    """
-    获取向量化模型（单例 + 缓存）
-
-    首次调用时加载模型，后续调用直接返回缓存的实例。
-    """
+def get_embed_model() -> SentenceTransformer:
+    """Load the embedding model once and cache the instance."""
     from sentence_transformers import SentenceTransformer
-    logging.info(f"加载向量化模型: {EMBED_MODEL_NAME}")
+
+    logger.info("Loading embedding model: %s", EMBED_MODEL_NAME)
     model = SentenceTransformer(EMBED_MODEL_NAME)
-    logging.info(f"向量化模型加载完成，输出维度: {model.get_sentence_embedding_dimension()}")
+    logger.info("Embedding model loaded; dimension: %s", model.get_sentence_embedding_dimension())
     return model
 
 
-def encode_texts(texts, show_progress=False):
-    """
-    将文本列表编码为向量
-
-    Args:
-        texts: 文本列表
-        show_progress: 是否显示进度条
-
-    Returns:
-        numpy 数组，形状为 (n_texts, embedding_dim)
-    """
+def encode_texts(texts: Sequence[str], show_progress: bool = False) -> NDArray[np.float32]:
+    """Encode ``texts`` into a float32 array of shape (n_texts, dimension)."""
     model = get_embed_model()
-    embeddings = model.encode(texts, show_progress_bar=show_progress)
-    return np.array(embeddings).astype('float32')
+    embeddings = model.encode(list(texts), show_progress_bar=show_progress)
+    return np.asarray(embeddings, dtype=np.float32)
 
 
-def encode_query(query):
-    """
-    将单个查询文本编码为向量
-
-    Returns:
-        numpy 数组，形状为 (1, embedding_dim)
-    """
+def encode_query(query: str) -> NDArray[np.float32]:
+    """Encode a single query into a float32 array of shape (1, dimension)."""
     model = get_embed_model()
     embedding = model.encode([query])
-    return np.array(embedding).astype('float32')
+    return np.asarray(embedding, dtype=np.float32)

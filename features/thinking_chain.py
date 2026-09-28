@@ -1,73 +1,75 @@
-"""
-思维链处理 —— DeepSeek-R1 思维链标签的格式化
+"""Thinking-chain formatting for reasoning models.
 
-学习要点：
-- DeepSeek-R1 模型会在回答中输出 <think>...</think> 标签，包含推理过程
-- 本模块将思维链内容转换为可折叠的 HTML 详情框
+Models such as DeepSeek-R1 wrap their reasoning in ``<think>...</think>``.
+This module turns each such block into a collapsible HTML ``<details>``
+element and escapes every other angle bracket so model output cannot inject
+markup.
 """
+
+from __future__ import annotations
 
 import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_THINK_OPEN = "<think>"
+_THINK_CLOSE = "</think>"
+_KEPT_TAG_PREFIXES = ("<details", "</details", "<summary", "</summary")
 
 
-def process_thinking_content(text):
-    """
-    处理包含 <think> 标签的内容，将其转换为可折叠的 HTML 格式
-
-    将 <think>推理过程</think> 转换为 <details> 可折叠标签。
-    """
+def process_thinking_content(text: Any) -> str:
+    """Render ``<think>`` blocks as ``<details>`` and escape all other tags."""
     if text is None:
         return ""
     if not isinstance(text, str):
         try:
-            processed_text = str(text)
-        except:
-            return "无法处理的内容格式"
+            processed = str(text)
+        except Exception:  # noqa: BLE001 - defensive: __str__ of arbitrary objects
+            return "Unprocessable content"
     else:
-        processed_text = text
+        processed = text
 
     try:
-        while "<think>" in processed_text and "</think>" in processed_text:
-            start_idx = processed_text.find("<think>")
-            end_idx = processed_text.find("</think>")
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                thinking_content = processed_text[start_idx + 7:end_idx]
-                before = processed_text[:start_idx]
-                after = processed_text[end_idx + 8:]
-                processed_text = (
-                    before +
-                    "\n\n<details>\n<summary>思考过程（点击展开）</summary>\n\n" +
-                    thinking_content +
-                    "\n\n</details>\n\n" +
-                    after
-                )
-
-        # 处理其他 HTML 标签，保留 details 和 summary
-        processed_html = []
-        i = 0
-        while i < len(processed_text):
-            if (processed_text[i:i + 8] == "<details" or
-                    processed_text[i:i + 9] == "</details" or
-                    processed_text[i:i + 8] == "<summary" or
-                    processed_text[i:i + 9] == "</summary"):
-                tag_end = processed_text.find(">", i)
-                if tag_end != -1:
-                    processed_html.append(processed_text[i:tag_end + 1])
-                    i = tag_end + 1
-                    continue
-            if processed_text[i] == "<":
-                processed_html.append("&lt;")
-            elif processed_text[i] == ">":
-                processed_html.append("&gt;")
-            else:
-                processed_html.append(processed_text[i])
-            i += 1
-
-        processed_text = "".join(processed_html)
-    except Exception as e:
-        logging.error(f"处理思维链内容时出错: {str(e)}")
+        while _THINK_OPEN in processed and _THINK_CLOSE in processed:
+            start = processed.find(_THINK_OPEN)
+            end = processed.find(_THINK_CLOSE)
+            if end <= start:
+                break
+            reasoning = processed[start + len(_THINK_OPEN) : end]
+            processed = (
+                processed[:start]
+                + "\n\n<details>\n<summary>Reasoning (click to expand)</summary>\n\n"
+                + reasoning
+                + "\n\n</details>\n\n"
+                + processed[end + len(_THINK_CLOSE) :]
+            )
+        return _escape_except_details(processed)
+    except Exception as exc:  # noqa: BLE001 - never let formatting take the answer down
+        logger.error("Failed to format thinking content: %s", exc)
         try:
-            return text.replace("<", "&lt;").replace(">", "&gt;")
-        except:
-            return "处理内容时出错"
+            return str(text).replace("<", "&lt;").replace(">", "&gt;")
+        except Exception:  # noqa: BLE001
+            return "Failed to format content"
 
-    return processed_text
+
+def _escape_except_details(text: str) -> str:
+    """HTML-escape angle brackets, keeping ``<details>`` and ``<summary>`` tags intact."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        if text.startswith(_KEPT_TAG_PREFIXES, i):
+            tag_end = text.find(">", i)
+            if tag_end != -1:
+                out.append(text[i : tag_end + 1])
+                i = tag_end + 1
+                continue
+        char = text[i]
+        if char == "<":
+            out.append("&lt;")
+        elif char == ">":
+            out.append("&gt;")
+        else:
+            out.append(char)
+        i += 1
+    return "".join(out)

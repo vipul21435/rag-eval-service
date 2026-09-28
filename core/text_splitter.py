@@ -1,34 +1,29 @@
-"""
-文本分块器 —— 将长文本切分为检索友好的片段
+"""Text splitter: cut long text into retrieval-sized, overlapping chunks.
 
-学习要点：
-- chunk_size：每个片段的最大字符数。过大则检索粒度粗，过小则上下文缺失
-- chunk_overlap：相邻片段的重叠字符数。避免关键信息被切断
-- separators：按优先级尝试的分割符。中文文档应包含中文标点
+``chunk_size`` bounds each chunk in characters: too large and retrieval gets
+coarse, too small and chunks lose context. ``chunk_overlap`` repeats the tail
+of one chunk at the head of the next so facts are not cut in half.
 """
+
+from __future__ import annotations
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from config import CHUNK_SIZE, CHUNK_OVERLAP
+
+from config import CHUNK_OVERLAP, CHUNK_SIZE
+
+# Tried in order: paragraph, line, CJK full stop / comma / semicolon / colon,
+# space, then individual characters as a last resort.
+SEPARATORS = ["\n\n", "\n", "\u3002", "\uff0c", "\uff1b", "\uff1a", " ", ""]
 
 
-def split_text(text, chunk_size=None, chunk_overlap=None):
+def split_text(text: str, chunk_size: int | None = None, chunk_overlap: int | None = None) -> list[str]:
+    """Split ``text`` recursively by ``SEPARATORS`` until chunks fit ``chunk_size``.
+
+    ``chunk_size`` and ``chunk_overlap`` default to the configured values.
     """
-    将长文本切分为多个片段
-
-    使用 RecursiveCharacterTextSplitter 递归切分：
-    先尝试按段落分割，若片段仍过大则按句子分割，以此类推。
-
-    Args:
-        text: 待切分的长文本
-        chunk_size: 每个片段的最大字符数（默认使用配置值 400）
-        chunk_overlap: 相邻片段的重叠字符数（默认使用配置值 40）
-
-    Returns:
-        切分后的文本片段列表
-    """
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size or CHUNK_SIZE,
-        chunk_overlap=chunk_overlap or CHUNK_OVERLAP,
-        separators=["\n\n", "\n", "。", "，", "；", "：", " ", ""]
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE if chunk_size is None else chunk_size,
+        chunk_overlap=CHUNK_OVERLAP if chunk_overlap is None else chunk_overlap,
+        separators=SEPARATORS,
     )
-    return text_splitter.split_text(text)
+    return splitter.split_text(text)

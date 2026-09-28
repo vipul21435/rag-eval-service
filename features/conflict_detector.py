@@ -1,50 +1,39 @@
-"""
-矛盾检测 —— 检测多来源信息的冲突
+"""Conflict detection: flag disagreeing facts across context sources.
 
-学习要点：
-- 当 RAG 系统同时使用本地文档和网络搜索时，不同来源可能存在矛盾
-- 矛盾检测帮助 LLM 在回答中标注差异，提高回答可信度
+When local documents and web results are combined, they may state different
+numbers for the same thing. A detected conflict makes the answer prompt ask
+the LLM to point out the discrepancy instead of silently picking one.
 """
+
+from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from typing import Any
+
+# Four-digit years and percentages; the values most likely to disagree across sources.
+_NUMERIC_FACT = re.compile(r"\b\d{4}\b|\b\d+(?:\.\d+)?%")
 
 
-def detect_conflicts(sources):
-    """检测多来源信息中的矛盾"""
-    key_facts = {}
+def detect_conflicts(sources: Iterable[dict[str, Any]]) -> bool:
+    """True when two sources disagree on the same extracted fact.
+
+    Each source is a mapping with the text under ``text`` (or ``excerpt``).
+    """
+    key_facts: dict[str, frozenset[str]] = {}
     for item in sources:
-        facts = _extract_facts(item['text'] if 'text' in item else item.get('excerpt', ''))
-        for fact, value in facts.items():
+        text = item["text"] if "text" in item else item.get("excerpt", "")
+        for fact, value in _extract_facts(text).items():
             if fact in key_facts and key_facts[fact] != value:
                 return True
             key_facts[fact] = value
     return False
 
 
-def _extract_facts(text):
-    """从文本提取关键事实"""
-    facts = {}
-    numbers = re.findall(r'\b\d{4}年|\b\d+%', text)
+def _extract_facts(text: str) -> dict[str, frozenset[str]]:
+    """Extract comparable facts; order of mention does not matter."""
+    facts: dict[str, frozenset[str]] = {}
+    numbers = _NUMERIC_FACT.findall(text)
     if numbers:
-        facts['关键数值'] = numbers
-    if "产业图谱" in text:
-        facts['技术方法'] = list(set(re.findall(r'[A-Za-z]+模型|[A-Z]{2,}算法', text)))
+        facts["numbers"] = frozenset(numbers)
     return facts
-
-
-def evaluate_source_credibility(source):
-    """评估来源可信度（基于域名简单规则）"""
-    credibility_scores = {
-        "gov.cn": 0.9, "edu.cn": 0.85, "weixin": 0.7, "zhihu": 0.6, "baidu": 0.5
-    }
-    url = source.get('url', '')
-    if not url:
-        return 0.5
-    domain_match = re.search(r'//([^/]+)', url)
-    if not domain_match:
-        return 0.5
-    domain = domain_match.group(1)
-    for known_domain, score in credibility_scores.items():
-        if known_domain in domain:
-            return score
-    return 0.5

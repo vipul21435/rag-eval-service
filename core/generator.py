@@ -18,7 +18,7 @@ from config import (
 from utils.network import get_session
 from core.retriever import recursive_retrieval
 from core.vector_store import vector_store
-from features.conflict_detector import detect_conflicts, evaluate_source_credibility
+from features.conflict_detector import detect_conflicts
 from features.thinking_chain import process_thinking_content
 
 

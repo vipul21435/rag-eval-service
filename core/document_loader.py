@@ -1,78 +1,90 @@
-"""
-文档加载器 —— 多格式文档文本提取
+"""Document loader: text extraction for the supported file formats.
 
-学习要点：
-- 了解不同文档格式（PDF、Word、Excel、PPT）的解析方式
-- 理解 RAG 第一步：将非结构化文档转换为纯文本
+PDF, TXT and Markdown work with the base install. DOCX, PPTX and Excel need
+the ``documents`` extra; without it those formats log an error and return an
+empty string so a bad file never aborts an ingestion batch.
 """
 
-import os
+from __future__ import annotations
+
 import logging
+import os
 from io import StringIO
 
+logger = logging.getLogger(__name__)
 
-def extract_text(filepath):
+TEXT_EXTENSIONS = frozenset({".txt", ".md"})
+EXCEL_EXTENSIONS = frozenset({".xlsx", ".xls"})
+SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".pptx"} | TEXT_EXTENSIONS | EXCEL_EXTENSIONS)
+
+
+def extract_text(filepath: str | os.PathLike[str]) -> str:
+    """Return the plain-text content of ``filepath``.
+
+    Unsupported extensions and missing optional parsers yield an empty string.
     """
-    从文件中提取纯文本内容
+    file_ext = os.path.splitext(os.fspath(filepath))[1].lower()
 
-    支持格式：PDF / Word / Excel / PPT / 纯文本 / Markdown
-
-    Args:
-        filepath: 文件路径
-
-    Returns:
-        提取的文本内容字符串
-    """
-    file_ext = os.path.splitext(filepath)[1].lower()
-
-    if file_ext == '.pdf':
-        from pdfminer.high_level import extract_text_to_fp
-        output = StringIO()
-        with open(filepath, 'rb') as file:
-            extract_text_to_fp(file, output)
-        return output.getvalue()
-
-    elif file_ext in ['.txt', '.md']:
-        with open(filepath, 'r', encoding='utf-8') as file:
+    if file_ext == ".pdf":
+        return _extract_pdf(filepath)
+    if file_ext in TEXT_EXTENSIONS:
+        with open(filepath, encoding="utf-8") as file:
             return file.read()
+    if file_ext == ".docx":
+        return _extract_docx(filepath)
+    if file_ext in EXCEL_EXTENSIONS:
+        return _extract_excel(filepath)
+    if file_ext == ".pptx":
+        return _extract_pptx(filepath)
 
-    elif file_ext == '.docx':
-        try:
-            from docx import Document
-            doc = Document(filepath)
-            return "\n".join([para.text for para in doc.paragraphs])
-        except ImportError:
-            logging.error("处理Word文档需要安装python-docx库")
-            return ""
+    logger.warning("Unsupported file format: %s", file_ext)
+    return ""
 
-    elif file_ext in ['.xlsx', '.xls']:
-        try:
-            import pandas as pd
-            text = ""
-            xl = pd.ExcelFile(filepath)
-            for sheet_name in xl.sheet_names:
-                df = xl.parse(sheet_name)
-                text += f"工作表: {sheet_name}\n"
-                text += df.to_string(index=False) + "\n\n"
-            return text
-        except ImportError:
-            logging.error("处理Excel文件需要安装pandas库")
-            return ""
 
-    elif file_ext == '.pptx':
-        try:
-            from pptx import Presentation
-            prs = Presentation(filepath)
-            text = ""
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text += shape.text + "\n"
-            return text
-        except ImportError:
-            logging.error("处理PPT文件需要安装python-pptx库")
-            return ""
+def _extract_pdf(filepath: str | os.PathLike[str]) -> str:
+    from pdfminer.high_level import extract_text_to_fp
 
-    else:
-        logging.warning(f"不支持的文件格式: {file_ext}")
+    output = StringIO()
+    with open(filepath, "rb") as file:
+        extract_text_to_fp(file, output)
+    return output.getvalue()
+
+
+def _extract_docx(filepath: str | os.PathLike[str]) -> str:
+    try:
+        from docx import Document
+    except ImportError:
+        logger.error("Reading .docx files requires python-docx (install the 'documents' extra)")
         return ""
+    document = Document(os.fspath(filepath))
+    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+
+def _extract_excel(filepath: str | os.PathLike[str]) -> str:
+    try:
+        import pandas as pd
+    except ImportError:
+        logger.error("Reading Excel files requires pandas (install the 'documents' extra)")
+        return ""
+    parts: list[str] = []
+    workbook = pd.ExcelFile(filepath)
+    for sheet_name in workbook.sheet_names:
+        frame = workbook.parse(sheet_name)
+        parts.append(f"Sheet: {sheet_name}\n{frame.to_string(index=False)}\n\n")
+    return "".join(parts)
+
+
+def _extract_pptx(filepath: str | os.PathLike[str]) -> str:
+    try:
+        from pptx import Presentation
+    except ImportError:
+        logger.error("Reading .pptx files requires python-pptx (install the 'documents' extra)")
+        return ""
+    presentation = Presentation(os.fspath(filepath))
+    lines: list[str] = []
+    for slide in presentation.slides:
+        for shape in slide.shapes:
+            text = getattr(shape, "text", None)
+            if text:
+                lines.append(text)
+    return "\n".join(lines) + ("\n" if lines else "")

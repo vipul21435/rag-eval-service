@@ -1,121 +1,161 @@
-"""
-重排序器 —— 对检索结果进行二次精排
+"""Reranker: second-stage scoring of retrieved candidates.
 
-学习要点：
-- 两阶段检索（Recall + Rerank）是工业界常用的范式
-- Recall 阶段用高效检索（FAISS/BM25）从大量文档中召回候选
-- Rerank 阶段用更精确的模型（交叉编码器/LLM）对候选精排
-- 交叉编码器比双塔模型更精确，但速度更慢（适合对少量候选精排）
+Recall (FAISS, BM25) is cheap and approximate; reranking applies a more
+accurate but slower model to the few candidates that survived. A
+cross-encoder reads the query and the document together, which is more
+precise than comparing two independent embeddings.
 """
+
+from __future__ import annotations
 
 import logging
 import re
 import threading
 from functools import lru_cache
-from config import OLLAMA_MODEL_NAME, RERANK_METHOD
+from typing import TYPE_CHECKING, TypedDict
 
-# 交叉编码器（懒加载 + 线程安全）
-_cross_encoder = None
+from config import OLLAMA_MODEL_NAME, RERANK_METHOD
+from core.vector_store import Metadata
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
+
+logger = logging.getLogger(__name__)
+
+
+class ScoredDoc(TypedDict):
+    score: float
+    content: str
+    metadata: Metadata
+
+
+# (chunk_id, scored document) pairs, best first.
+RankedDocs = list[tuple[str, ScoredDoc]]
+
+CROSS_ENCODER_MODEL_NAME = "sentence-transformers/distiluse-base-multilingual-cased-v2"
+
+_cross_encoder: CrossEncoder | None = None
 _cross_encoder_lock = threading.Lock()
 
 
-def get_cross_encoder():
-    """懒加载交叉编码器模型（双重检查锁定，线程安全）"""
+def get_cross_encoder() -> CrossEncoder | None:
+    """Load the cross-encoder lazily (double-checked locking); None if loading fails."""
     global _cross_encoder
     if _cross_encoder is None:
         with _cross_encoder_lock:
             if _cross_encoder is None:
                 try:
                     from sentence_transformers import CrossEncoder
-                    _cross_encoder = CrossEncoder(
-                        'sentence-transformers/distiluse-base-multilingual-cased-v2'
-                    )
-                    logging.info("交叉编码器加载成功")
-                except Exception as e:
-                    logging.error(f"加载交叉编码器失败: {str(e)}")
+
+                    _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL_NAME)
+                    logger.info("Cross-encoder loaded: %s", CROSS_ENCODER_MODEL_NAME)
+                except Exception as exc:  # noqa: BLE001 - model download or load failure
+                    logger.error("Failed to load cross-encoder: %s", exc)
                     _cross_encoder = None
     return _cross_encoder
 
 
-def rerank_with_cross_encoder(query, docs, doc_ids, metadata_list, top_k=5):
-    """使用交叉编码器对检索结果进行重排序"""
+def rerank_with_cross_encoder(
+    query: str,
+    docs: list[str],
+    doc_ids: list[str],
+    metadata_list: list[Metadata],
+    top_k: int = 5,
+) -> RankedDocs:
+    """Score each (query, doc) pair with the cross-encoder and keep the best ``top_k``."""
     if not docs:
         return []
 
     encoder = get_cross_encoder()
     if encoder is None:
-        logging.warning("交叉编码器不可用，跳过重排序")
+        logger.warning("Cross-encoder unavailable; skipping reranking")
         return _fallback_results(doc_ids, docs, metadata_list)
 
-    cross_inputs = [[query, doc] for doc in docs]
     try:
-        scores = encoder.predict(cross_inputs)
-        results = [
-            (doc_id, {'content': doc, 'metadata': meta, 'score': float(score)})
-            for doc_id, doc, meta, score in zip(doc_ids, docs, metadata_list, scores)
-        ]
-        results = sorted(results, key=lambda x: x[1]['score'], reverse=True)
-        return results[:top_k]
-    except Exception as e:
-        logging.error(f"交叉编码器重排序失败: {str(e)}")
+        scores = encoder.predict([[query, doc] for doc in docs])
+    except Exception as exc:  # noqa: BLE001 - inference failure
+        logger.error("Cross-encoder reranking failed: %s", exc)
         return _fallback_results(doc_ids, docs, metadata_list)
 
-
-@lru_cache(maxsize=32)
-def get_llm_relevance_score(query, doc):
-    """使用 LLM 对查询和文档的相关性进行评分（带缓存）"""
-    from utils.network import get_session
-    try:
-        prompt = f"""给定以下查询和文档片段，评估它们的相关性。
-        评分标准：0分表示完全不相关，10分表示高度相关。
-        只需返回一个0-10之间的整数分数，不要有任何其他解释。
-
-        查询: {query}
-        文档片段: {doc}
-        相关性分数(0-10):"""
-
-        response = get_session().post(
-            "http://localhost:11434/api/generate",
-            json={"model": OLLAMA_MODEL_NAME, "prompt": prompt, "stream": False},
-            timeout=180
-        )
-        result = response.json().get("response", "").strip()
-        try:
-            return max(0, min(10, float(result)))
-        except ValueError:
-            match = re.search(r'\b([0-9]|10)\b', result)
-            return float(match.group(1)) if match else 5.0
-    except Exception as e:
-        logging.error(f"LLM评分失败: {str(e)}")
-        return 5.0
-
-
-def rerank_with_llm(query, docs, doc_ids, metadata_list, top_k=5):
-    """使用 LLM 逐一评分进行重排序"""
-    if not docs:
-        return []
-    results = []
-    for doc_id, doc, meta in zip(doc_ids, docs, metadata_list):
-        score = get_llm_relevance_score(query, doc)
-        results.append((doc_id, {'content': doc, 'metadata': meta, 'score': score / 10.0}))
-    results = sorted(results, key=lambda x: x[1]['score'], reverse=True)
+    results: RankedDocs = [
+        (doc_id, {"content": doc, "metadata": meta, "score": float(score)})
+        for doc_id, doc, meta, score in zip(doc_ids, docs, metadata_list, scores, strict=True)
+    ]
+    results.sort(key=lambda item: item[1]["score"], reverse=True)
     return results[:top_k]
 
 
-def rerank_results(query, docs, doc_ids, metadata_list, method=None, top_k=5):
-    """对检索结果进行重排序（统一入口）"""
+@lru_cache(maxsize=32)
+def get_llm_relevance_score(query: str, doc: str) -> float:
+    """Ask the local Ollama model for a 0-10 relevance score (cached per pair)."""
+    from utils.network import get_session
+
+    prompt = f"""Rate how relevant the document excerpt is to the query.
+Scale: 0 means completely unrelated, 10 means highly relevant.
+Reply with a single integer between 0 and 10 and nothing else.
+
+Query: {query}
+Document excerpt: {doc}
+Relevance score (0-10):"""
+
+    try:
+        response = get_session().post(
+            "http://localhost:11434/api/generate",
+            json={"model": OLLAMA_MODEL_NAME, "prompt": prompt, "stream": False},
+            timeout=180,
+        )
+        result = str(response.json().get("response", "")).strip()
+    except Exception as exc:  # noqa: BLE001 - network or decode failure
+        logger.error("LLM relevance scoring failed: %s", exc)
+        return 5.0
+
+    try:
+        return max(0.0, min(10.0, float(result)))
+    except ValueError:
+        match = re.search(r"\b([0-9]|10)\b", result)
+        return float(match.group(1)) if match else 5.0
+
+
+def rerank_with_llm(
+    query: str,
+    docs: list[str],
+    doc_ids: list[str],
+    metadata_list: list[Metadata],
+    top_k: int = 5,
+) -> RankedDocs:
+    """Score each document with the LLM and keep the best ``top_k``."""
+    if not docs:
+        return []
+    results: RankedDocs = [
+        (doc_id, {"content": doc, "metadata": meta, "score": get_llm_relevance_score(query, doc) / 10.0})
+        for doc_id, doc, meta in zip(doc_ids, docs, metadata_list, strict=True)
+    ]
+    results.sort(key=lambda item: item[1]["score"], reverse=True)
+    return results[:top_k]
+
+
+def rerank_results(
+    query: str,
+    docs: list[str],
+    doc_ids: list[str],
+    metadata_list: list[Metadata],
+    method: str | None = None,
+    top_k: int = 5,
+) -> RankedDocs:
+    """Rerank with ``method`` (``cross_encoder`` or ``llm``); anything else keeps the input order."""
     if method is None:
         method = RERANK_METHOD
 
     if method == "llm":
         return rerank_with_llm(query, docs, doc_ids, metadata_list, top_k)
-    elif method == "cross_encoder":
+    if method == "cross_encoder":
         return rerank_with_cross_encoder(query, docs, doc_ids, metadata_list, top_k)
-    else:
-        return _fallback_results(doc_ids, docs, metadata_list)
+    return _fallback_results(doc_ids, docs, metadata_list)
 
 
-def _fallback_results(doc_ids, docs, metadata_list):
-    """回退方案：按原始顺序返回"""
-    return [(doc_id, {'content': doc, 'metadata': meta, 'score': 1.0 - idx / len(docs)})
-            for idx, (doc_id, doc, meta) in enumerate(zip(doc_ids, docs, metadata_list))]
+def _fallback_results(doc_ids: list[str], docs: list[str], metadata_list: list[Metadata]) -> RankedDocs:
+    """Keep the input order, with scores decreasing by rank."""
+    return [
+        (doc_id, {"content": doc, "metadata": meta, "score": 1.0 - idx / len(docs)})
+        for idx, (doc_id, doc, meta) in enumerate(zip(doc_ids, docs, metadata_list, strict=True))
+    ]
