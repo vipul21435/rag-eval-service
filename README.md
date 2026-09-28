@@ -594,15 +594,17 @@ make install     # uv sync --locked --all-extras --dev
 make lint        # ruff check and ruff format --check
 make typecheck   # strict mypy over src, tests and examples
 make test        # pytest with coverage
+make eval        # retrieval scores against the golden set; exits 1 below the thresholds
 make mcp-latency # the MCP tools timed in-process and over stdio
-make ci          # the four above, as GitHub Actions runs them
+make ci          # the five above, as GitHub Actions runs them
 uv run pre-commit install   # run the checks on every commit
 ```
 
 Tests run without network access, model downloads or API keys: the
 fixtures in `tests/conftest.py` install hermetic settings with the hash
 embedder and the embedding cache disabled. GitHub Actions runs lint, type
-check, tests and the MCP latency example (which drives a real
+check, tests, the retrieval evaluation (`make eval`, which fails the job
+below the thresholds) and the MCP latency example (which drives a real
 `recallmcp-mcp` child process over stdio), then builds the container
 image, validates the compose file and checks `/health` and `/ready` on a
 running container.
