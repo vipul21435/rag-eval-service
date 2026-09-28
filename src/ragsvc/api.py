@@ -214,7 +214,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = get_settings()
     application = FastAPI(
-        title="rag-eval-service",
+        title="RecallMCP",
         description="Document question answering over local FAISS + BM25 hybrid retrieval",
         version=__version__,
         lifespan=lifespan,

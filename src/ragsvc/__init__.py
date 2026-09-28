@@ -1,4 +1,4 @@
-"""rag-eval-service: a FastAPI RAG service with local embeddings and hybrid retrieval.
+"""RecallMCP: a local-first RAG service with local embeddings and hybrid retrieval.
 
 The package grew out of Local PDF Chat RAG by Will Wei (MIT license). The
 modules under ``ragsvc.core`` and ``ragsvc.features`` are reworked versions

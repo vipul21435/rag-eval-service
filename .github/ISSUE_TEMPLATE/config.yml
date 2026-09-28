@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/vipul21435/rag-eval-service/security/advisories/new
+    url: https://github.com/vipul21435/recallmcp/security/advisories/new
     about: Report vulnerabilities privately instead of opening a public issue.

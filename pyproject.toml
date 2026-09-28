@@ -1,10 +1,12 @@
 [project]
-name = "rag-eval-service"
+name = "recallmcp"
 dynamic = ["version"]
-description = "FastAPI RAG service with local embeddings, FAISS + BM25 hybrid retrieval and a retrieval evaluation suite"
+description = "Local-first RAG service: FastAPI API over local embeddings, FAISS + BM25 hybrid retrieval and cross-encoder reranking"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
+authors = [{ name = "Vipul Jha" }]
+keywords = ["rag", "retrieval", "faiss", "bm25", "fastapi", "mcp"]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
@@ -47,8 +49,13 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.urls]
+Homepage = "https://github.com/vipul21435/recallmcp"
+Repository = "https://github.com/vipul21435/recallmcp"
+Upstream = "https://github.com/weiwill88/Local_Pdf_Chat_RAG"
+
 [project.scripts]
-ragsvc = "ragsvc.__main__:main"
+recallmcp = "ragsvc.__main__:main"
 
 [tool.hatch.version]
 path = "src/ragsvc/__init__.py"

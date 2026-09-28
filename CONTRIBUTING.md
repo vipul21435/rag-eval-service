@@ -1,4 +1,4 @@
-# Contributing to rag-eval-service
+# Contributing to RecallMCP
 
 Thanks for helping improve this project. Contributions should keep the RAG pipeline understandable, runnable, and easy to inspect.
 
@@ -14,8 +14,8 @@ Security vulnerabilities must follow [`SECURITY.md`](SECURITY.md) and must not b
 ## Development setup
 
 ```bash
-git clone https://github.com/vipul21435/rag-eval-service.git
-cd rag-eval-service
+git clone https://github.com/vipul21435/recallmcp.git
+cd recallmcp
 uv sync --all-extras --dev
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```

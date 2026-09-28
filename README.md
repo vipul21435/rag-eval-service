@@ -1,12 +1,15 @@
-# rag-eval-service
+Forked from https://github.com/weiwill88/Local_Pdf_Chat_RAG.
 
-A FastAPI retrieval-augmented generation service with local
-sentence-transformers embeddings, FAISS + BM25 hybrid retrieval, and a
-retrieval evaluation suite. Everything runs on CPU with no paid API keys;
+# RecallMCP
+
+A local-first retrieval-augmented generation service: a FastAPI API over
+sentence-transformers embeddings, FAISS + BM25 hybrid retrieval and
+cross-encoder reranking. Everything runs on CPU with no paid API keys;
 hosted LLM providers are optional and configured through environment
-variables.
+variables. A retrieval evaluation suite and an MCP server for agents are
+being built on this base.
 
-[![CI](https://github.com/vipul21435/rag-eval-service/actions/workflows/ci.yml/badge.svg)](https://github.com/vipul21435/rag-eval-service/actions/workflows/ci.yml)
+[![CI](https://github.com/vipul21435/recallmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/vipul21435/recallmcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 
@@ -15,9 +18,30 @@ This repository is a fork of
 (MIT, Will Wei), an educational RAG reference implementation. The upstream
 pipeline (document loading, chunking, embeddings, FAISS, BM25, hybrid merge,
 reranking, generation) is kept and reworked into a service that is measured
-rather than demoed: the Gradio UI is gone, the API is the only interface, and
-retrieval quality is tracked by an evaluation suite. See
-[CHANGELOG.md](CHANGELOG.md) for what changed relative to upstream.
+rather than demoed: the Gradio UI is gone, the API is the only interface.
+See [CHANGELOG.md](CHANGELOG.md) for the full list of changes relative to
+upstream.
+
+## What I built on top
+
+- The `ragsvc` package under `src/` with an application factory
+  (`create_app(settings)`), typed and validated `RAG_` settings
+  (pydantic-settings) and the `recallmcp` CLI.
+- Local-first providers: a running Ollama is auto-detected, any
+  OpenAI-compatible endpoint works behind environment variables, and no
+  paid API is needed to run or test the service.
+- Security defaults: loopback bind, CORS allowlist without credentials,
+  an upload size cap and an optional bearer token.
+- A typed ingestion pipeline with per-file reports; a failed upload keeps
+  the previous knowledge base and concurrent uploads are serialized, with
+  new indexes swapped in as a snapshot.
+- Structured `/api/ask` responses: sources from retrieval metadata, model
+  reasoning as a separate field, `409` for an empty knowledge base and
+  `502` for provider failures.
+- BM25 tokenization with a regex instead of jieba; English-only code,
+  prompts and docs.
+- Ruff, strict mypy, pre-commit and GitHub Actions CI; tests run without
+  network access, model downloads or credentials.
 
 ## Pipeline
 
@@ -43,14 +67,14 @@ and the locked dependencies into `.venv`; torch is resolved from the PyTorch
 CPU index on Linux so no CUDA wheels are downloaded.
 
 ```bash
-git clone https://github.com/vipul21435/rag-eval-service.git
-cd rag-eval-service
+git clone https://github.com/vipul21435/recallmcp.git
+cd recallmcp
 
 uv sync                    # runtime dependencies
 uv sync --extra documents  # also install DOCX / PPTX / Excel parsers
 cp .env.example .env       # optional: pick an LLM provider or tune retrieval
 
-uv run ragsvc               # or: uv run python -m ragsvc
+uv run recallmcp           # or: uv run python -m ragsvc
 ```
 
 The API listens on `127.0.0.1` and the first free port in `17995-17999`
@@ -117,7 +141,7 @@ mode by ``uv sync``.
 ```text
 src/ragsvc/
   __init__.py              Package version
-  __main__.py              `python -m ragsvc` / `ragsvc`: serve the API
+  __main__.py              `recallmcp` / `python -m ragsvc`: serve the API
   api.py                   FastAPI application
   config.py                Typed RAG_ settings: providers, models, retrieval, API
   core/

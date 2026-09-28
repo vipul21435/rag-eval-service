@@ -5,7 +5,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Thanks for helping improve rag-eval-service. Remove credentials and private documents before submitting.
+      value: Thanks for helping improve RecallMCP. Remove credentials and private documents before submitting.
   - type: input
     id: version
     attributes:
