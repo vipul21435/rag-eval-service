@@ -12,8 +12,15 @@ def test_tokenize_lowercases_and_splits_on_punctuation():
 
 
 def test_tokenize_splits_cjk_into_characters_and_keeps_latin_words():
-    # "中文检索" is four CJK characters glued to a Latin word.
-    assert tokenize("中文检索rag hybrid") == ["中", "文", "检", "索", "rag", "hybrid"]
+    # Four CJK characters glued to a Latin word.
+    assert tokenize("\u4e2d\u6587\u68c0\u7d22rag hybrid") == [
+        "\u4e2d",
+        "\u6587",
+        "\u68c0",
+        "\u7d22",
+        "rag",
+        "hybrid",
+    ]
 
 
 def test_tokenize_empty_text():

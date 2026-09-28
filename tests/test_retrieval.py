@@ -2,9 +2,10 @@ import numpy as np
 import pytest
 
 import core.retriever as retriever
-from core.bm25_index import BM25IndexManager
+from core.bm25_index import BM25Hit, BM25IndexManager, bm25_manager
 from core.generator import _build_context, _build_prompt
 from core.retriever import hybrid_merge
+from core.vector_store import vector_store
 
 
 def test_bm25_returns_relevant_document_first():
@@ -30,7 +31,7 @@ def test_hybrid_merge_combines_semantic_and_sparse_scores():
         "documents": [["semantic result", "shared result"]],
         "metadatas": [[{"source": "a"}, {"source": "b"}]],
     }
-    sparse = [
+    sparse: list[BM25Hit] = [
         {"id": "doc-b", "score": 4.0, "content": "shared result"},
         {"id": "doc-c", "score": 2.0, "content": "keyword result"},
     ]
@@ -58,7 +59,7 @@ def test_recursive_retrieval_returns_web_results_with_source_metadata(monkeypatc
         lambda query: np.zeros((1, 384), dtype="float32"),
     )
     monkeypatch.setattr(
-        retriever.vector_store,
+        vector_store,
         "search",
         lambda query_embedding, k: (
             ["Local retrieval context."],
@@ -66,7 +67,7 @@ def test_recursive_retrieval_returns_web_results_with_source_metadata(monkeypatc
             [{"source": "local.pdf"}],
         ),
     )
-    monkeypatch.setattr(retriever.bm25_manager, "bm25_index", None)
+    monkeypatch.setattr(bm25_manager, "bm25_index", None)
     monkeypatch.setattr(
         retriever,
         "rerank_results",
@@ -75,7 +76,7 @@ def test_recursive_retrieval_returns_web_results_with_source_metadata(monkeypatc
                 doc_id,
                 {"content": doc, "metadata": meta, "score": 1.0},
             )
-            for doc_id, doc, meta in zip(ids, docs, metadata)
+            for doc_id, doc, meta in zip(ids, docs, metadata, strict=True)
         ],
     )
 
@@ -138,11 +139,11 @@ def test_recursive_retrieval_deduplicates_web_results_across_iterations(monkeypa
         lambda query: np.zeros((1, 384), dtype="float32"),
     )
     monkeypatch.setattr(
-        retriever.vector_store,
+        vector_store,
         "search",
         lambda query_embedding, k: ([], [], []),
     )
-    monkeypatch.setattr(retriever.bm25_manager, "bm25_index", None)
+    monkeypatch.setattr(bm25_manager, "bm25_index", None)
     monkeypatch.setattr(
         "core.generator.call_llm_simple",
         lambda prompt, provider: "refined retrieval query",
@@ -155,7 +156,7 @@ def test_recursive_retrieval_deduplicates_web_results_across_iterations(monkeypa
     )
 
     assert contexts == [web_result["snippet"]]
-    source_key = url or f'{web_result["title"]}\n{web_result["snippet"]}'
+    source_key = url or f"{web_result['title']}\n{web_result['snippet']}"
     assert doc_ids == [f"web:{source_key}"]
     assert len(metadata) == 1
 

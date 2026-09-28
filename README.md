@@ -108,11 +108,13 @@ tests/                     Tests that need no network access or credentials
 
 ```bash
 uv sync --all-extras --dev
-uv run pytest
+uv run ruff check . && uv run ruff format --check .   # lint and formatting
+uv run mypy                                          # strict type check
+uv run pytest                                        # tests
 ```
 
 Tests run without network access, model downloads or API keys. GitHub
-Actions runs the suite on every push and pull request.
+Actions runs lint, type check and tests on every push and pull request.
 
 ## Known limitations
 

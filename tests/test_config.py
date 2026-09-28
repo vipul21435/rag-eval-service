@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 import config
 
@@ -47,12 +48,10 @@ def test_detect_default_provider_does_not_probe_when_set_explicitly(monkeypatch)
 
 
 def test_ollama_available_is_false_when_nothing_listens(monkeypatch):
-    import requests
-
     def refused(*args, **kwargs):
         raise requests.ConnectionError("connection refused")
 
-    monkeypatch.setattr(config.requests, "get", refused)
+    monkeypatch.setattr(requests, "get", refused)
 
     assert config.ollama_available("http://127.0.0.1:1") is False
 

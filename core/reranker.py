@@ -70,7 +70,7 @@ def rerank_with_cross_encoder(
         return _fallback_results(doc_ids, docs, metadata_list)
 
     try:
-        scores = encoder.predict([[query, doc] for doc in docs])
+        scores = encoder.predict([(query, doc) for doc in docs])
     except Exception as exc:  # noqa: BLE001 - inference failure
         logger.error("Cross-encoder reranking failed: %s", exc)
         return _fallback_results(doc_ids, docs, metadata_list)
@@ -140,7 +140,7 @@ def rerank_results(
     method: str | None = None,
     top_k: int = 5,
 ) -> RankedDocs:
-    """Rerank with ``method`` (``cross_encoder`` or ``llm``); ``none`` or anything else keeps the input order."""
+    """Rerank with ``method``: ``cross_encoder`` or ``llm``; any other value keeps the input order."""
     if method is None:
         method = RERANK_METHOD
 

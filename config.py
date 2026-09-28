@@ -91,7 +91,7 @@ def choose_default_provider(
     if explicit:
         if explicit not in PROVIDER_CHOICES:
             raise ValueError(f"LLM_PROVIDER must be one of {PROVIDER_CHOICES}, got {explicit!r}")
-        return explicit  # type: ignore[return-value]
+        return explicit
     if ollama_reachable:
         return "ollama"
     if is_configured_api_key(openai_key):
@@ -114,9 +114,7 @@ def detect_default_provider() -> Provider:
     elif provider == "openai":
         logger.info("OPENAI_API_KEY configured; using %s at %s", OPENAI_MODEL, OPENAI_BASE_URL)
     else:
-        logger.warning(
-            "No LLM backend available: start Ollama at %s or set OPENAI_API_KEY", OLLAMA_BASE_URL
-        )
+        logger.warning("No LLM backend available: start Ollama at %s or set OPENAI_API_KEY", OLLAMA_BASE_URL)
     return provider
 
 
@@ -126,4 +124,4 @@ def resolve_provider(requested: str | None) -> Provider:
         return detect_default_provider()
     if requested not in PROVIDER_CHOICES:
         raise ValueError(f"provider must be one of {PROVIDER_CHOICES}, got {requested!r}")
-    return requested  # type: ignore[return-value]
+    return requested

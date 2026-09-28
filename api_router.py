@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,7 +78,7 @@ class FileProcessResult(BaseModel):
 
 
 @app.post("/api/upload", response_model=FileProcessResult)
-async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
     """Index one document, replacing the current knowledge base."""
     filename = file.filename or "upload"
     suffix = os.path.splitext(filename)[1]
@@ -90,7 +90,9 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
 
         report = await asyncio.to_thread(ingest_files, [SourceFile(path=Path(tmp_path), name=filename)])
         result = report.files[0]
-        message = f"{filename}: indexed {result.chunks} chunk(s)" if result.ok else f"{filename}: {result.error}"
+        message = (
+            f"{filename}: indexed {result.chunks} chunk(s)" if result.ok else f"{filename}: {result.error}"
+        )
         return {
             "status": "success" if result.ok else "error",
             "message": message,

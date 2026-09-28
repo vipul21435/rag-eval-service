@@ -12,6 +12,8 @@ restarts at 0.1.0.
   that returns a structured per-file report and is shared by every entry point.
 - `pyproject.toml` with a committed `uv.lock` on Python 3.12; torch comes from
   the PyTorch CPU index on Linux.
+- Ruff (lint + format) and strict mypy configuration in `pyproject.toml`;
+  CI runs lint, formatting check, type check and tests.
 
 ### Changed
 

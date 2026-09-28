@@ -33,7 +33,7 @@ def serpapi_search(query: str, num_results: int = 5) -> list[WebResult]:
     """Query SerpAPI; returns an empty list on any request failure."""
     if not SERPAPI_KEY:
         raise ValueError("SERPAPI_KEY is not set")
-    params = {
+    params: dict[str, str | int] = {
         "engine": SEARCH_ENGINE,
         "q": query,
         "api_key": SERPAPI_KEY,

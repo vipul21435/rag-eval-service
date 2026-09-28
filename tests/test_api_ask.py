@@ -38,11 +38,12 @@ def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):
 
 def test_ask_uses_detected_default_provider(client, monkeypatch):
     seen: list[str] = []
-    monkeypatch.setattr(
-        api_router,
-        "answer_question",
-        lambda question, enable_web_search, provider: seen.append(provider) or Answer(text="ok", provider=provider),
-    )
+
+    def fake_answer(question, enable_web_search, provider):
+        seen.append(provider)
+        return Answer(text="ok", provider=provider)
+
+    monkeypatch.setattr(api_router, "answer_question", fake_answer)
 
     response = client.post("/api/ask", json={"question": "hello"})
 

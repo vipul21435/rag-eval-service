@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 _WORD = re.compile(r"\w+")
 # CJK Unified Ideographs (basic block and extension A).
-_CJK = re.compile(r"[㐀-䶿一-鿿]")
-_CJK_OR_RUN = re.compile(r"[㐀-䶿一-鿿]|[^㐀-䶿一-鿿]+")
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_CJK_OR_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]|[^\u3400-\u4dbf\u4e00-\u9fff]+")
 
 
 class BM25Hit(TypedDict):
@@ -73,7 +73,11 @@ class BM25IndexManager:
         for idx in top_indices:
             if scores[idx] > 0:
                 results.append(
-                    {"id": self.doc_mapping[int(idx)], "score": float(scores[idx]), "content": self.raw_corpus[idx]}
+                    {
+                        "id": self.doc_mapping[int(idx)],
+                        "score": float(scores[idx]),
+                        "content": self.raw_corpus[idx],
+                    }
                 )
         return results
 

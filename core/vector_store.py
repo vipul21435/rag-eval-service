@@ -15,7 +15,7 @@ import logging
 from typing import Any
 
 import numpy as np
-from faiss import Index, IndexFlatL2, IndexIVFFlat, IndexIVFPQ
+from faiss import Index, IndexFlatL2, IndexIVF, IndexIVFFlat, IndexIVFPQ
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
@@ -70,19 +70,20 @@ class AutoFaissIndex:
         return self.index
 
     def train(self, vectors: NDArray[np.float32]) -> None:
-        if self.index_type in ("IVFFlat", "IVFPQ"):
-            self._require_index().train(vectors)
+        index = self._require_index()
+        if isinstance(index, IndexIVF):
+            index.train(vectors)
 
     def add(self, vectors: NDArray[np.float32]) -> None:
         index = self._require_index()
-        if self.index_type in ("IVFFlat", "IVFPQ") and not index.is_trained:
+        if isinstance(index, IndexIVF) and not index.is_trained:
             self.train(vectors)
         index.add(vectors)
 
     def search(self, query_vectors: NDArray[np.float32], k: int = 5) -> tuple[NDArray[Any], NDArray[Any]]:
         """Return (distances, indices) for the nearest ``k`` vectors of each query."""
         index = self._require_index()
-        if self.index_type in ("IVFFlat", "IVFPQ") and self.nprobe is not None:
+        if isinstance(index, IndexIVF) and self.nprobe is not None:
             index.nprobe = self.nprobe
         distances, indices = index.search(query_vectors, k)
         return distances, indices

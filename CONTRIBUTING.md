@@ -17,8 +17,11 @@ Security vulnerabilities must follow [`SECURITY.md`](SECURITY.md) and must not b
 git clone https://github.com/vipul21435/rag-eval-service.git
 cd rag-eval-service
 uv sync --all-extras --dev
-uv run pytest
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest
 ```
+
+Ruff (lint and format) and mypy (strict) run in CI; `uv run ruff format .`
+rewrites files in place.
 
 Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; run `uv lock` after changing them and commit both files.
 
@@ -28,7 +31,7 @@ Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; run `uv l
 2. Keep the change small enough to review and explain why it belongs in the service.
 3. Add or update tests for behavior changes.
 4. Update `README.md` and `CHANGELOG.md` when public usage changes.
-5. Run the compile and test commands above before opening the pull request.
+5. Run the lint, type-check and test commands above before opening the pull request.
 6. Complete the pull request template and link related issues.
 
 Please avoid unrelated formatting rewrites, generated dependency folders, model files, credentials, and private test documents.
