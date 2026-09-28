@@ -58,6 +58,10 @@ def test_load_golden_parses_lines_and_skips_blanks(tmp_path: Path) -> None:
         ('{"query": "x", "relevant": ["a"]}', "expected an object with id"),
         ('{"id": "q", "query": "x", "relevant": []}', "non-empty list"),
         ('{"id": "q", "query": "x", "relevant": [1]}', "non-empty list"),
+        ('{"id": null, "query": "x", "relevant": ["a"]}', "id must be a non-empty string"),
+        ('{"id": " ", "query": "x", "relevant": ["a"]}', "id must be a non-empty string"),
+        ('{"id": "q", "query": 123, "relevant": ["a"]}', "query must be a non-empty string"),
+        ('{"id": "q", "query": "", "relevant": ["a"]}', "query must be a non-empty string"),
         (
             '{"id": "q", "query": "x", "relevant": ["a"]}\n{"id": "q", "query": "y", "relevant": ["a"]}',
             "duplicate",
@@ -82,6 +86,8 @@ def test_load_thresholds_reads_k_and_both_modes(tmp_path: Path) -> None:
     [
         ("k = [", "not valid TOML"),
         ("k = 0\n", "positive integer"),
+        ("k = true\n", "positive integer"),
+        ("k = 1\n[dense]\nrecall = true\nmrr = 1\nndcg = 1\n[hybrid]\n", r"\[dense\].recall"),
         ("k = 1\n[dense]\nrecall = 1\nmrr = 1\nndcg = 1\n", r"missing \[hybrid\]"),
         ("k = 1\n[dense]\nrecall = 2\nmrr = 1\nndcg = 1\n[hybrid]\n", r"\[dense\].recall"),
         ("k = 1\n[dense]\nrecall = 1\nmrr = 'x'\nndcg = 1\n[hybrid]\n", r"\[dense\].mrr"),
@@ -132,6 +138,15 @@ def test_evaluate_scores_both_modes_and_serialises(small_knowledge_base: list[Go
     assert "## Per query" in markdown
 
 
+def test_markdown_escapes_pipes_in_queries(tmp_path: Path, small_knowledge_base: list[GoldenQuery]) -> None:
+    golden = load_golden(
+        write(tmp_path / "p.jsonl", '{"id": "p", "query": "apples | pears", "relevant": ["fruit.md"]}')
+    )
+    row = [line for line in evaluate(golden, k=2).to_markdown().splitlines() if line.startswith("| apples")]
+    assert row and row[0].startswith("| apples \\| pears | dense |")
+    assert row[0].count("|") - row[0].count("\\|") == 6
+
+
 def test_failures_name_every_metric_below_its_threshold(small_knowledge_base: list[GoldenQuery]) -> None:
     report: EvalReport = evaluate(small_knowledge_base, k=2)
     passing = Thresholds(k=2, minimums={"dense": {"recall": 0.0, "mrr": 0.0, "ndcg": 0.0}, "hybrid": {}})
@@ -141,4 +156,10 @@ def test_failures_name_every_metric_below_its_threshold(small_knowledge_base: li
         k=2, minimums={"hybrid": {"recall": 1.0, "mrr": 1.0, "ndcg": 1.0}, "dense": {"mrr": 1.01}}
     )
     failures = report.failures(impossible)
-    assert failures == [f"dense mrr@2 = {report.means('dense')['mrr']:.3f} < 1.010"]
+    assert failures == [f"dense mrr = {report.means('dense')['mrr']:.3f} < 1.010"]
+    assert report.failures(
+        Thresholds(k=2, minimums={"dense": {"recall": 1.01, "ndcg": 1.01}, "hybrid": {}})
+    ) == [
+        f"dense recall@2 = {report.means('dense')['recall']:.3f} < 1.010",
+        f"dense ndcg@2 = {report.means('dense')['ndcg']:.3f} < 1.010",
+    ]

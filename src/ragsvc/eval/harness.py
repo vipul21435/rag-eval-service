@@ -59,11 +59,15 @@ def load_golden(path: Path) -> list[GoldenQuery]:
         relevant = record["relevant"]
         if not isinstance(relevant, list) or not relevant or not all(isinstance(r, str) for r in relevant):
             raise GoldenSetError(f"{path}:{number}: relevant must be a non-empty list of source names")
-        query_id = str(record["id"])
+        query_id, query = record["id"], record["query"]
+        if not isinstance(query_id, str) or not query_id.strip():
+            raise GoldenSetError(f"{path}:{number}: id must be a non-empty string")
+        if not isinstance(query, str) or not query.strip():
+            raise GoldenSetError(f"{path}:{number}: query must be a non-empty string")
         if query_id in seen:
             raise GoldenSetError(f"{path}:{number}: duplicate query id {query_id!r}")
         seen.add(query_id)
-        queries.append(GoldenQuery(id=query_id, query=str(record["query"]), relevant=frozenset(relevant)))
+        queries.append(GoldenQuery(id=query_id, query=query, relevant=frozenset(relevant)))
     if not queries:
         raise GoldenSetError(f"{path}: the golden set is empty")
     return queries
@@ -84,7 +88,7 @@ def load_thresholds(path: Path) -> Thresholds:
     except tomllib.TOMLDecodeError as exc:
         raise GoldenSetError(f"{path}: not valid TOML: {exc}") from exc
     k = data.get("k")
-    if not isinstance(k, int) or k < 1:
+    if isinstance(k, bool) or not isinstance(k, int) or k < 1:
         raise GoldenSetError(f"{path}: k must be a positive integer")
     minimums: dict[Mode, dict[str, float]] = {}
     for mode in MODES:
@@ -94,7 +98,11 @@ def load_thresholds(path: Path) -> Thresholds:
         values: dict[str, float] = {}
         for metric in METRICS:
             value = table.get(metric)
-            if not isinstance(value, int | float) or not 0.0 <= float(value) <= 1.0:
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not 0.0 <= float(value) <= 1.0
+            ):
                 raise GoldenSetError(f"{path}: [{mode}].{metric} must be a number between 0 and 1")
             values[metric] = float(value)
         minimums[mode] = values
@@ -142,6 +150,10 @@ class EvalReport:
                 return report.means
         raise KeyError(mode)
 
+    def label(self, metric: str) -> str:
+        """``recall@k`` and ``ndcg@k`` are cut at k; MRR scans the whole candidate list."""
+        return metric if metric == "mrr" else f"{metric}@{self.k}"
+
     def failures(self, thresholds: Thresholds) -> list[str]:
         """Human-readable lines for every metric below its threshold; empty when the gate passes."""
         lines: list[str] = []
@@ -149,7 +161,7 @@ class EvalReport:
             means = self.means(mode)
             for metric, minimum in minimums.items():
                 if means[metric] < minimum:
-                    lines.append(f"{mode} {metric}@{self.k} = {means[metric]:.3f} < {minimum:.3f}")
+                    lines.append(f"{mode} {self.label(metric)} = {means[metric]:.3f} < {minimum:.3f}")
         return lines
 
     def to_dict(self) -> dict[str, Any]:
@@ -180,10 +192,9 @@ class EvalReport:
             "| --- | --- | --- | --- | --- |",
         ]
         for report in self.modes:
-            per_query.extend(
-                f"| {s.query} | {report.mode} | {s.recall:.2f} | {s.mrr:.2f} | {s.ndcg:.2f} |"
-                for s in report.queries
-            )
+            for s in report.queries:
+                query = s.query.replace("|", "\\|")
+                per_query.append(f"| {query} | {report.mode} | {s.recall:.2f} | {s.mrr:.2f} | {s.ndcg:.2f} |")
         return "\n".join(header + rows + per_query) + "\n"
 
 

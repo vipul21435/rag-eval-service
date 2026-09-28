@@ -6,7 +6,8 @@ their defaults so a ``.env`` file or ``RAG_*`` variables in the shell cannot
 change the benchmark numbers. It then evaluates ``examples/eval/golden.v1.jsonl`` in
 dense-only and hybrid mode, writes ``retrieval-eval.json`` and
 ``retrieval-eval.md`` into ``--output-dir`` (default ``eval-reports/``) and
-exits 1 when a mean drops below ``examples/eval/thresholds.toml``.
+exits 1 when a mean drops below ``examples/eval/thresholds.toml`` and 2
+when the golden set or the thresholds file cannot be loaded.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from ragsvc.config import Settings, set_settings
 from ragsvc.core.ingest import SourceFile, ingest_files
-from ragsvc.eval.harness import evaluate, load_golden, load_thresholds
+from ragsvc.eval.harness import GoldenSetError, evaluate, load_golden, load_thresholds
 from ragsvc.logging_setup import configure_logging
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
@@ -55,8 +56,12 @@ def main(argv: list[str] | None = None) -> int:
     set_settings(settings)
     configure_logging(settings.log_level, settings.log_format)
 
-    golden = load_golden(args.golden)
-    thresholds = load_thresholds(args.thresholds)
+    try:
+        golden = load_golden(args.golden)
+        thresholds = load_thresholds(args.thresholds)
+    except (GoldenSetError, OSError) as exc:
+        print(f"cannot load the evaluation inputs: {exc}", file=sys.stderr)
+        return 2
     sources = [SourceFile.from_path(path) for path in sorted(args.docs.glob("*.md"))]
     if not sources:
         print(f"no sample documents under {args.docs}", file=sys.stderr)

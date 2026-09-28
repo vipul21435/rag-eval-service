@@ -88,4 +88,12 @@ def test_eval_script_fails_when_a_threshold_is_not_met(tmp_path: Path) -> None:
     completed = run_script(tmp_path, "--thresholds", str(strict))
 
     assert completed.returncode == 1
-    assert "THRESHOLD FAILED: dense mrr@3" in completed.stderr
+    assert "THRESHOLD FAILED: dense mrr = 0.917 < 1.000" in completed.stderr
+
+
+def test_eval_script_reports_unloadable_inputs_without_a_traceback(tmp_path: Path) -> None:
+    completed = run_script(tmp_path, "--golden", str(tmp_path / "missing.jsonl"))
+
+    assert completed.returncode == 2
+    assert "cannot load the evaluation inputs" in completed.stderr
+    assert "Traceback" not in completed.stderr

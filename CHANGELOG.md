@@ -15,7 +15,13 @@ restarts at 0.1.0.
   `make eval` (`examples/eval_retrieval.py`) writing
   `eval-reports/retrieval-eval.{json,md}` for dense-only and hybrid
   retrieval and exiting 1 below a threshold, and `tests/test_eval_gate.py`
-  failing the suite on a regression. Offline, hash embedder.
+  failing the suite on a regression. Offline, hash embedder. The script
+  pins the chunking and retrieval hyperparameters so a `.env` file cannot
+  move the numbers, records the candidate count in the report, exits 2
+  with a one-line message when its inputs cannot be loaded, rejects
+  non-string ids and empty queries in the golden set and TOML booleans in
+  the thresholds, escapes `|` in the per-query table and labels MRR
+  without a cut-off in threshold failures.
 - An MCP server (`ragsvc.mcp_server`, console script `recallmcp-mcp`) on the
   official `mcp` package with the stdio transport, exposing
   `ingest_document`, `search`, `list_documents` and `health` over the same
