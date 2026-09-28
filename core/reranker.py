@@ -14,7 +14,7 @@ import threading
 from functools import lru_cache
 from typing import TYPE_CHECKING, TypedDict
 
-from config import OLLAMA_MODEL_NAME, RERANK_METHOD
+from config import OLLAMA_BASE_URL, OLLAMA_MODEL, RERANK_METHOD, RERANK_MODEL_NAME
 from core.vector_store import Metadata
 
 if TYPE_CHECKING:
@@ -32,8 +32,6 @@ class ScoredDoc(TypedDict):
 # (chunk_id, scored document) pairs, best first.
 RankedDocs = list[tuple[str, ScoredDoc]]
 
-CROSS_ENCODER_MODEL_NAME = "sentence-transformers/distiluse-base-multilingual-cased-v2"
-
 _cross_encoder: CrossEncoder | None = None
 _cross_encoder_lock = threading.Lock()
 
@@ -47,8 +45,8 @@ def get_cross_encoder() -> CrossEncoder | None:
                 try:
                     from sentence_transformers import CrossEncoder
 
-                    _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL_NAME)
-                    logger.info("Cross-encoder loaded: %s", CROSS_ENCODER_MODEL_NAME)
+                    _cross_encoder = CrossEncoder(RERANK_MODEL_NAME)
+                    logger.info("Cross-encoder loaded: %s", RERANK_MODEL_NAME)
                 except Exception as exc:  # noqa: BLE001 - model download or load failure
                     logger.error("Failed to load cross-encoder: %s", exc)
                     _cross_encoder = None
@@ -100,8 +98,8 @@ Relevance score (0-10):"""
 
     try:
         response = get_session().post(
-            "http://localhost:11434/api/generate",
-            json={"model": OLLAMA_MODEL_NAME, "prompt": prompt, "stream": False},
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
             timeout=180,
         )
         result = str(response.json().get("response", "")).strip()
@@ -142,7 +140,7 @@ def rerank_results(
     method: str | None = None,
     top_k: int = 5,
 ) -> RankedDocs:
-    """Rerank with ``method`` (``cross_encoder`` or ``llm``); anything else keeps the input order."""
+    """Rerank with ``method`` (``cross_encoder`` or ``llm``); ``none`` or anything else keeps the input order."""
     if method is None:
         method = RERANK_METHOD
 

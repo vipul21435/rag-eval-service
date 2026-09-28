@@ -1,138 +1,154 @@
-"""
-REST API 模块（使用FastAPI实现）
-"""
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import tempfile
-import os
-import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional
-import logging
-import asyncio
-from contextlib import asynccontextmanager
-from version import __version__
+"""REST API: FastAPI application exposing upload, ask and status endpoints."""
 
-# 从重构后的模块导入
-from config import SILICONFLOW_API_KEY, MAGICK_API_KEY, is_configured_api_key
-from core.generator import query_answer
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from config import (
+    OLLAMA_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    Provider,
+    detect_default_provider,
+    is_configured_api_key,
+    resolve_provider,
+)
+from core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
 from core.ingest import SourceFile, ingest_files
 from core.vector_store import vector_store
 from features.web_search import check_serpapi_key
 from utils.network import is_port_available
+from version import __version__
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("rag-api")
+
+CANDIDATE_PORTS = (17995, 17996, 17997, 17998, 17999)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("API 服务启动")
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    logger.info("API starting; default LLM provider: %s", detect_default_provider())
     yield
-    logger.info("API 服务已关闭")
+    logger.info("API stopped")
 
 
 app = FastAPI(
-    title="本地RAG API服务",
-    description="提供基于本地大模型、云端模型服务和SERPAPI的文档问答API接口",
+    title="rag-eval-service",
+    description="Document question answering over local FAISS + BM25 hybrid retrieval",
     version=__version__,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 class QuestionRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1)
     enable_web_search: bool = False
-    model_choice: str = "siliconflow"
+    provider: Provider | None = Field(default=None, description="ollama or openai; default is auto-detected")
 
 
 class AnswerResponse(BaseModel):
     answer: str
-    sources: List[Dict[str, Any]]
-    metadata: Dict[str, Any]
+    sources: list[dict[str, Any]]
+    metadata: dict[str, Any]
 
 
 class FileProcessResult(BaseModel):
     status: str
     message: str
-    file_info: Optional[Dict[str, Any]] = None
+    file_info: dict[str, Any] | None = None
 
 
 @app.post("/api/upload", response_model=FileProcessResult)
-async def upload_file(file: UploadFile = File(...)):
-    """处理文档并存入向量数据库"""
+async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Index one document, replacing the current knowledge base."""
     filename = file.filename or "upload"
     suffix = os.path.splitext(filename)[1]
-    tmp_path = None
+    tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
 
-        report = await asyncio.to_thread(
-            ingest_files, [SourceFile(path=Path(tmp_path), name=filename)]
-        )
+        report = await asyncio.to_thread(ingest_files, [SourceFile(path=Path(tmp_path), name=filename)])
         result = report.files[0]
-        if result.ok:
-            message = f"{filename}: indexed {result.chunks} chunk(s)"
-        else:
-            message = f"{filename}: {result.error}"
+        message = f"{filename}: indexed {result.chunks} chunk(s)" if result.ok else f"{filename}: {result.error}"
         return {
             "status": "success" if result.ok else "error",
             "message": message,
-            "file_info": {"filename": filename, "chunks": result.chunks}
+            "file_info": {"filename": filename, "chunks": result.chunks},
         }
-    except Exception as e:
-        logger.error(f"文件处理失败: {str(e)}")
-        raise HTTPException(500, f"文档处理失败: {str(e)}") from e
+    except Exception as exc:
+        logger.error("Document processing failed: %s", exc)
+        raise HTTPException(500, f"Document processing failed: {exc}") from exc
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
 @app.post("/api/ask", response_model=AnswerResponse)
-async def ask_question(req: QuestionRequest):
-    """问答接口"""
-    if not req.question:
-        raise HTTPException(400, "问题不能为空")
+async def ask_question(req: QuestionRequest) -> dict[str, Any]:
+    """Answer a question from the indexed documents (and optionally the web)."""
+    provider = resolve_provider(req.provider)
     try:
-        answer = await asyncio.to_thread(query_answer, req.question, req.enable_web_search, req.model_choice)
-        sources = []
-        url_matches = re.findall(r'\[(网络来源|本地文档):[^\]]+\]\s*(?:\(URL:\s*([^)]+)\))?', answer)
-        for source_type, url in url_matches:
-            sources.append({"type": source_type, "url": url} if url else {"type": source_type})
+        answer = await asyncio.to_thread(answer_question, req.question, req.enable_web_search, provider)
+    except KnowledgeBaseEmptyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderError as exc:
+        logger.error("LLM provider failed: %s", exc)
+        raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Question answering failed: %s", exc)
+        raise HTTPException(500, f"Question answering failed: {exc}") from exc
 
-        return {
-            "answer": answer, "sources": sources,
-            "metadata": {"enable_web_search": req.enable_web_search, "model": req.model_choice}
-        }
-    except Exception as e:
-        logger.error(f"问答失败: {str(e)}")
-        raise HTTPException(500, f"问答处理失败: {str(e)}") from e
+    return {
+        "answer": answer.text,
+        "sources": answer.sources,
+        "metadata": {
+            "enable_web_search": req.enable_web_search,
+            "provider": answer.provider,
+            "conflict_detected": answer.conflict_detected,
+        },
+    }
 
 
 @app.get("/api/status")
-async def check_status():
+async def check_status() -> dict[str, Any]:
     return {
         "status": "healthy",
-        "siliconflow_configured": is_configured_api_key(SILICONFLOW_API_KEY),
-        "magick_configured": is_configured_api_key(MAGICK_API_KEY),
+        "version": __version__,
+        "default_provider": detect_default_provider(),
+        "ollama_model": OLLAMA_MODEL,
+        "openai_configured": is_configured_api_key(OPENAI_API_KEY),
+        "openai_model": OPENAI_MODEL,
         "serpapi_configured": check_serpapi_key(),
         "vector_store_ready": vector_store.is_ready,
         "total_chunks": vector_store.total_chunks,
-        "version": __version__
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    port = next((p for p in [17995, 17996, 17997, 17998, 17999] if is_port_available(p)), 17995)
-    logger.info(f"启动API服务，端口: {port}")
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    port = next((p for p in CANDIDATE_PORTS if is_port_available(p)), CANDIDATE_PORTS[0])
+    logger.info("Starting API on port %d", port)
     uvicorn.run(app, host="0.0.0.0", port=port)

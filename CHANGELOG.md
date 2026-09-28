@@ -15,8 +15,19 @@ restarts at 0.1.0.
 
 ### Changed
 
+- Local-first configuration: providers are `ollama` (default, auto-detected)
+  and `openai` (any OpenAI-compatible endpoint via `OPENAI_*`). The
+  SiliconFlow and Magick provider settings, the `hf-mirror.com` Hugging Face
+  endpoint override and the global `requests` retry patch are gone. Embedding
+  and reranker models plus retrieval hyperparameters are configurable through
+  environment variables, and provider detection no longer runs at import time.
+- `POST /api/ask` takes `provider` instead of `model_choice`, returns
+  structured sources from retrieval metadata rather than regex-parsing the
+  answer, and maps an empty knowledge base to `409` and provider failures to
+  `502` instead of returning error text as the answer.
 - `POST /api/upload` reports chunk counts from the ingestion report instead of
   parsing the demo UI's status text.
+- `example.env` is now `.env.example`; `config.py` no longer falls back to it.
 - Comments, docstrings, log messages and LLM prompts in `core/`, `features/`
   and `utils/` are in English; the query-rewriting prompt now uses the
   `NO_FURTHER_QUERY` sentinel and web search defaults to English results.
@@ -25,6 +36,10 @@ restarts at 0.1.0.
 
 ### Fixed
 
+- The default reranker model was a bi-encoder
+  (`distiluse-base-multilingual-cased-v2`) loaded as a cross-encoder, which
+  scores with an untrained head; the default is now
+  `cross-encoder/ms-marco-MiniLM-L-6-v2`.
 - `split_text(chunk_overlap=0)` used the configured default instead of zero.
 - Office-format parsers (DOCX, PPTX, Excel) are an optional `documents` extra.
 
@@ -32,6 +47,8 @@ restarts at 0.1.0.
 
 - The Gradio demo UI, its screenshots, the sample Chinese PDF, the generated
   OpenWiki pages and the Chinese README. The REST API is the only interface.
+- `stream_answer` (Gradio-only streaming) and the unused source-credibility
+  scorer.
 
 ## [2.1.0] - 2026-08-12
 

@@ -1,8 +1,9 @@
 """Embeddings: map text into a vector space with a sentence-transformers model.
 
 Semantically similar texts end up close together, which is what the FAISS
-index searches on. The default model is small, English-oriented and runs on
-CPU; it is downloaded from the Hugging Face Hub on first use.
+index searches on. The default model (``all-MiniLM-L6-v2``, 384 dimensions,
+about 80 MB) is English-oriented and fast on CPU; it is downloaded from the
+Hugging Face Hub on first use. Override it with ``EMBED_MODEL_NAME``.
 """
 
 from __future__ import annotations
@@ -15,13 +16,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
+from config import EMBED_MODEL_NAME
+
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
-
-# all-MiniLM-L6-v2: 384 dimensions, about 80 MB, fast on CPU.
-EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 @lru_cache(maxsize=1)

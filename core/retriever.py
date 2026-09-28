@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from config import HYBRID_ALPHA, MAX_RETRIEVAL_ITERATIONS, RERANK_TOP_K, RETRIEVAL_TOP_K
+from config import HYBRID_ALPHA, MAX_RETRIEVAL_ITERATIONS, RERANK_TOP_K, RETRIEVAL_TOP_K, Provider
 from core.bm25_index import BM25Hit, bm25_manager
 from core.embeddings import encode_query
 from core.reranker import RankedDocs, ScoredDoc, rerank_results
@@ -146,12 +146,12 @@ def recursive_retrieval(
     initial_query: str,
     max_iterations: int | None = None,
     enable_web_search: bool = False,
-    model_choice: str = "siliconflow",
+    provider: Provider = "ollama",
 ) -> RetrievalResult:
     """Retrieve context for ``initial_query`` over up to ``max_iterations`` rounds.
 
     Each round runs dense + BM25 retrieval, merges and reranks the candidates,
-    then asks the LLM (via ``model_choice``) whether a refined query is worth
+    then asks the LLM (via ``provider``) whether a refined query is worth
     another round. Web results, when enabled, are added once per source.
 
     Returns ``(contexts, doc_ids, metadata)`` with parallel positions.
@@ -209,7 +209,7 @@ def recursive_retrieval(
         try:
             from core.generator import call_llm_simple
 
-            next_query = call_llm_simple(_build_rewrite_prompt(initial_query, summary), model_choice)
+            next_query = call_llm_simple(_build_rewrite_prompt(initial_query, summary), provider)
         except Exception as exc:  # noqa: BLE001 - keep what we have if the LLM is unavailable
             logger.error("Query rewriting failed: %s", exc)
             break

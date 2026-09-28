@@ -1,127 +1,129 @@
-"""
-配置中心 —— 环境变量加载、模型参数、自动检测机制
+"""Configuration: environment loading, provider settings and retrieval hyperparameters.
 
-学习要点：
-- 了解如何通过 .env 文件管理敏感配置（API Key）
-- 了解 RAG 系统中的关键超参数及其作用
-- 理解 LLM 后端的自动检测与回退机制
+Every setting has a local default, so the service runs with no ``.env`` file,
+no API keys and no network access beyond the first model download. Values
+come from the process environment, then from ``.env`` next to this file.
 """
 
-import os
+from __future__ import annotations
+
 import logging
-import requests
+import os
+from functools import lru_cache
 from pathlib import Path
+from typing import Literal, get_args
+
+import requests
 from dotenv import load_dotenv
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第一步：加载环境变量
-# 优先加载 .env（用户配置），不存在则回退到 example.env（示例配置）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-dotenv_path = Path(__file__).parent / ".env"
-if not dotenv_path.exists():
-    dotenv_path = Path(__file__).parent / "example.env"
-    logging.warning("⚠️ 未找到 .env 文件，已回退加载 example.env。建议：cp example.env .env 并填入真实 API Key")
-load_dotenv(dotenv_path)
+logger = logging.getLogger(__name__)
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第二步：API 密钥配置
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENV_PATH = Path(__file__).parent / ".env"
+# Existing environment variables take precedence over .env values.
+load_dotenv(ENV_PATH)
+
+
+def _env_int(name: str, default: int) -> int:
+    return int(os.getenv(name, default))
+
+
+def _env_float(name: str, default: float) -> float:
+    return float(os.getenv(name, default))
+
+
+# --- LLM providers -----------------------------------------------------------
+# "ollama": a local Ollama server. "openai": any OpenAI-compatible Chat
+# Completions endpoint (OpenAI, vLLM, LM Studio, hosted providers).
+Provider = Literal["ollama", "openai"]
+PROVIDER_CHOICES: tuple[Provider, ...] = get_args(Provider)
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER") or None
+
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# --- Retrieval models (downloaded from the Hugging Face Hub on first use) ----
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
+RERANK_METHOD = os.getenv("RERANK_METHOD", "cross_encoder")  # cross_encoder | llm | none
+RERANK_MODEL_NAME = os.getenv("RERANK_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+# --- Retrieval hyperparameters ----------------------------------------------
+CHUNK_SIZE = _env_int("CHUNK_SIZE", 400)  # characters per chunk
+CHUNK_OVERLAP = _env_int("CHUNK_OVERLAP", 40)  # characters shared by adjacent chunks
+HYBRID_ALPHA = _env_float("HYBRID_ALPHA", 0.7)  # weight of dense vs. BM25 scores (0-1)
+RETRIEVAL_TOP_K = _env_int("RETRIEVAL_TOP_K", 10)  # candidates per retriever
+RERANK_TOP_K = _env_int("RERANK_TOP_K", 5)  # candidates kept after reranking
+MAX_RETRIEVAL_ITERATIONS = _env_int("MAX_RETRIEVAL_ITERATIONS", 3)  # recursive retrieval rounds
+
+# --- Optional web search -----------------------------------------------------
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 SEARCH_ENGINE = "google"
 
-SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY")
-SILICONFLOW_API_URL = os.getenv(
-    "SILICONFLOW_API_URL",
-    "https://api.siliconflow.cn/v1/chat/completions"
-)
-MAGICK_API_KEY = os.getenv("MAGICK_API_KEY")
-MAGICK_API_URL = os.getenv(
-    "MAGICK_API_URL",
-    "https://api.magickapi.com/v1/chat/completions"
-)
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第三步：模型名称配置
-# Ollama 格式: deepseek-r1:8b
-# SiliconFlow/Magick API 格式: 使用对应平台提供的模型 ID
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "deepseek-r1:8b")
-SILICONFLOW_MODEL_NAME = os.getenv("SILICONFLOW_MODEL_NAME", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
-MAGICK_MODEL_NAME = os.getenv("MAGICK_MODEL_NAME", "gpt-4o-mini")
-RERANK_METHOD = os.getenv("RERANK_METHOD", "cross_encoder")
-
-MODEL_CHOICES = ["ollama", "siliconflow", "magick"]
-MODEL_DISPLAY_NAMES = {
-    "ollama": "本地 Ollama 模型",
-    "siliconflow": "Cloud DeepSeek-R1 模型",
-    "magick": "Magick API 模型"
-}
-
-
-def is_configured_api_key(api_key):
-    """判断 API Key 是否为用户实际配置值。"""
+def is_configured_api_key(api_key: str | None) -> bool:
+    """True when ``api_key`` is a real value rather than empty or a ``Your...`` placeholder."""
     return bool(api_key and api_key.strip() and not api_key.strip().startswith("Your"))
 
 
-def choose_default_model(siliconflow_key, magick_key, ollama_available=False):
-    """按稳定、可测试的优先级选择默认模型后端。"""
-    if is_configured_api_key(siliconflow_key):
-        return "siliconflow"
-    if is_configured_api_key(magick_key):
-        return "magick"
-    if ollama_available:
-        return "ollama"
-    # 保持 UI 的默认选项稳定；启动检查会给出明确的未配置提示。
-    return "siliconflow"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第四步：RAG 超参数
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CHUNK_SIZE = 400          # 文本分块大小（字符数）
-CHUNK_OVERLAP = 40        # 相邻分块的重叠字符数
-HYBRID_ALPHA = 0.7        # 混合检索中语义检索的权重（0-1）
-RETRIEVAL_TOP_K = 10      # 检索返回的候选文档数量
-RERANK_TOP_K = 5          # 重排序后保留的文档数量
-MAX_RETRIEVAL_ITERATIONS = 3  # 递归检索的最大迭代轮数
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第五步：运行时环境配置
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
-requests.adapters.DEFAULT_RETRIES = 3
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 第六步：LLM 后端自动检测
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def detect_default_model():
-    """
-    自动检测可用的 LLM 后端，返回默认模型选择
-
-    检测优先级：
-    1. SiliconFlow API Key 已配置 → 默认使用云端 API
-    2. Magick API Key 已配置 → 默认使用 Magick API
-    3. 本地 Ollama 服务可用 → 默认使用本地模型
-    4. 都不可用 → 返回 siliconflow 并提示用户配置
-    """
-    if is_configured_api_key(SILICONFLOW_API_KEY):
-        logging.info("✅ 检测到 SiliconFlow API Key，默认使用云端模型")
-        return choose_default_model(SILICONFLOW_API_KEY, MAGICK_API_KEY)
-
-    if is_configured_api_key(MAGICK_API_KEY):
-        logging.info("✅ 检测到 Magick API Key，默认使用 Magick API 模型")
-        return choose_default_model(SILICONFLOW_API_KEY, MAGICK_API_KEY)
-
+def ollama_available(base_url: str = OLLAMA_BASE_URL, timeout: float = 2.0) -> bool:
+    """True when an Ollama server answers at ``base_url``."""
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=3)
-        if response.status_code == 200:
-            logging.info("✅ 检测到本地 Ollama 服务，默认使用本地模型")
-            return choose_default_model(SILICONFLOW_API_KEY, MAGICK_API_KEY, ollama_available=True)
-    except Exception:
-        pass
+        return requests.get(f"{base_url}/api/tags", timeout=timeout).status_code == 200
+    except requests.RequestException:
+        return False
 
-    logging.warning("⚠️ 未检测到可用 LLM 后端，请配置 SiliconFlow/Magick API Key 或启动 Ollama")
-    return choose_default_model(SILICONFLOW_API_KEY, MAGICK_API_KEY)
 
-DEFAULT_MODEL_CHOICE = detect_default_model()
+def choose_default_provider(
+    explicit: str | None,
+    ollama_reachable: bool,
+    openai_key: str | None,
+) -> Provider:
+    """Pick the provider to use when a request does not name one.
+
+    An explicit ``LLM_PROVIDER`` wins. Otherwise local Ollama is preferred,
+    then an OpenAI-compatible endpoint with a configured key. With nothing
+    available the choice stays ``ollama`` and the call fails with a clear error.
+    """
+    if explicit:
+        if explicit not in PROVIDER_CHOICES:
+            raise ValueError(f"LLM_PROVIDER must be one of {PROVIDER_CHOICES}, got {explicit!r}")
+        return explicit  # type: ignore[return-value]
+    if ollama_reachable:
+        return "ollama"
+    if is_configured_api_key(openai_key):
+        return "openai"
+    return "ollama"
+
+
+@lru_cache(maxsize=1)
+def detect_default_provider() -> Provider:
+    """Resolve the default provider once, probing Ollama only when needed."""
+    if LLM_PROVIDER:
+        provider = choose_default_provider(LLM_PROVIDER, False, OPENAI_API_KEY)
+        logger.info("LLM provider set explicitly: %s", provider)
+        return provider
+
+    reachable = ollama_available()
+    provider = choose_default_provider(None, reachable, OPENAI_API_KEY)
+    if reachable:
+        logger.info("Ollama detected at %s; using local model %s", OLLAMA_BASE_URL, OLLAMA_MODEL)
+    elif provider == "openai":
+        logger.info("OPENAI_API_KEY configured; using %s at %s", OPENAI_MODEL, OPENAI_BASE_URL)
+    else:
+        logger.warning(
+            "No LLM backend available: start Ollama at %s or set OPENAI_API_KEY", OLLAMA_BASE_URL
+        )
+    return provider
+
+
+def resolve_provider(requested: str | None) -> Provider:
+    """Validate a provider named in a request, or fall back to the detected default."""
+    if requested is None:
+        return detect_default_provider()
+    if requested not in PROVIDER_CHOICES:
+        raise ValueError(f"provider must be one of {PROVIDER_CHOICES}, got {requested!r}")
+    return requested  # type: ignore[return-value]

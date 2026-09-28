@@ -48,7 +48,7 @@ cd rag-eval-service
 
 uv sync                    # runtime dependencies
 uv sync --extra documents  # also install DOCX / PPTX / Excel parsers
-cp example.env .env        # optional: configure a model backend
+cp .env.example .env       # optional: pick an LLM provider or tune retrieval
 
 uv run python api_router.py
 ```
@@ -58,25 +58,30 @@ The API listens on the first free port in `17995-17999`. Main endpoints:
 - `GET /api/status`: runtime and provider configuration status;
 - `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
   XLS/XLSX with the `documents` extra) and rebuild the indexes from it;
-- `POST /api/ask`: ask a question against the indexed documents.
+- `POST /api/ask`: ask a question against the indexed documents
+  (`{"question": "...", "provider": "ollama" | "openai" | null}`); answers
+  carry the source documents and whether the sources disagree.
 
 Embedding and reranking models are downloaded from the Hugging Face Hub on
-first use and cached locally.
+first use and cached locally. Answer generation needs an LLM: a local
+[Ollama](https://ollama.com/) server is used when one is running, otherwise
+any OpenAI-compatible endpoint configured through `OPENAI_*`. Without either,
+upload and retrieval work and `/api/ask` returns `502` with a clear message.
 
 ## Configuration
 
-See [`example.env`](example.env) for the complete example. Common variables:
+Every variable is optional; see [`.env.example`](.env.example) for the full
+list with defaults.
 
 | Variable | Purpose |
 | --- | --- |
-| `SILICONFLOW_API_KEY` | SiliconFlow API credential |
-| `SILICONFLOW_MODEL_NAME` | SiliconFlow model ID |
-| `MAGICK_API_KEY` | OpenAI-compatible provider credential |
-| `MAGICK_API_URL` | Provider base URL or full Chat Completions URL |
-| `MAGICK_MODEL_NAME` | Provider model ID |
-| `OLLAMA_MODEL_NAME` | Local Ollama model name |
+| `LLM_PROVIDER` | Force `ollama` or `openai` instead of auto-detecting |
+| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local Ollama server and model (`llama3.2`) |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | Any OpenAI-compatible Chat Completions endpoint |
+| `EMBED_MODEL_NAME` | Sentence-transformers embedding model (`all-MiniLM-L6-v2`) |
+| `RERANK_METHOD`, `RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
+| `CHUNK_SIZE`, `CHUNK_OVERLAP`, `HYBRID_ALPHA`, `RETRIEVAL_TOP_K`, `RERANK_TOP_K`, `MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
 | `SERPAPI_KEY` | Optional web-search credential |
-| `RERANK_METHOD` | `cross_encoder` or `llm` |
 
 ## Repository layout
 
