@@ -28,3 +28,7 @@ htmlcov/
 # Local browser verification artifacts
 .playwright-cli/
 output/playwright/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/

@@ -8,7 +8,7 @@ English | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/weiwill88/Local_Pdf_Chat_RAG/actions/workflows/ci.yml/badge.svg)](https://github.com/weiwill88/Local_Pdf_Chat_RAG/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
 [![Release](https://img.shields.io/github/v/release/weiwill88/Local_Pdf_Chat_RAG)](https://github.com/weiwill88/Local_Pdf_Chat_RAG/releases)
 [![Stars](https://img.shields.io/github/stars/weiwill88/Local_Pdf_Chat_RAG?style=social)](https://github.com/weiwill88/Local_Pdf_Chat_RAG/stargazers)
 
@@ -69,13 +69,13 @@ flowchart LR
 ### 1. Create an environment
 
 ```bash
-git clone https://github.com/weiwill88/Local_Pdf_Chat_RAG.git
-cd Local_Pdf_Chat_RAG
+git clone https://github.com/vipul21435/rag-eval-service.git
+cd rag-eval-service
 
-python3.10 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# Requires uv: https://docs.astral.sh/uv/
+uv sync                 # Python 3.12 virtualenv with the locked dependencies
+uv sync --extra ui      # also install the Gradio demo UI
+uv sync --extra documents  # also install DOCX / PPTX / Excel parsers
 ```
 
 ### 2. Configure one model backend
@@ -95,7 +95,7 @@ Keep real credentials in your local `.env` file. Values beginning with `Your_` a
 ### 3. Start the web UI
 
 ```bash
-python rag_demo.py
+uv run python rag_demo.py
 ```
 
 The application first tries `http://127.0.0.1:17995`, then ports 17996–17999 if needed.
@@ -103,7 +103,7 @@ The application first tries `http://127.0.0.1:17995`, then ports 17996–17999 i
 ### 4. Start the REST API
 
 ```bash
-python api_router.py
+uv run python api_router.py
 ```
 
 Main endpoints:
@@ -135,8 +135,7 @@ Main endpoints:
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
+uv run pytest
 ```
 
 The current suite covers:

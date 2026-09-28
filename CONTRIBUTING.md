@@ -14,14 +14,13 @@ Security vulnerabilities must follow [`SECURITY.md`](SECURITY.md) and must not b
 ## Development setup
 
 ```bash
-git clone https://github.com/weiwill88/Local_Pdf_Chat_RAG.git
-cd Local_Pdf_Chat_RAG
-python3.10 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements-dev.txt
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
+git clone https://github.com/vipul21435/rag-eval-service.git
+cd rag-eval-service
+uv sync --all-extras --dev
+uv run pytest
 ```
+
+Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; run `uv lock` after changing them and commit both files.
 
 ## Pull request expectations
 
