@@ -250,9 +250,9 @@ sample file and a first `search` of 16 ms inside the container.
 | --- | --- |
 | `uv run recallmcp` (or `python -m ragsvc`) | Serve the API on `RAG_API_HOST:RAG_API_PORT` (default `127.0.0.1`, first free port in `17995-17999`) |
 | `uv run recallmcp-mcp` (or `python -m ragsvc.mcp_server`) | Serve the MCP tools on stdio; documents are read from `RAG_MCP_DOCUMENT_ROOT` |
-| `uv run python examples/mcp_latency.py` | Time the four tools in-process and over a real stdio child process (offline, hash embedder) |
+| `make mcp-latency` (`examples/mcp_latency.py`) | Time the four tools in-process and over a real stdio child process (offline, hash embedder); CI runs it too |
 | `make demo` | Run `examples/demo.py`: ingest `examples/docs/`, re-ingest, three timed queries, cache counters |
-| `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is what GitHub Actions runs |
+| `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is lint, typecheck, test and mcp-latency, what GitHub Actions runs |
 | `make docker-build`, `make docker-up` | Build `recallmcp:dev`; start it with compose |
 
 ### HTTP API
@@ -522,15 +522,18 @@ make install     # uv sync --locked --all-extras --dev
 make lint        # ruff check and ruff format --check
 make typecheck   # strict mypy over src, tests and examples
 make test        # pytest with coverage
-make ci          # the three above, as GitHub Actions runs them
+make mcp-latency # the MCP tools timed in-process and over stdio
+make ci          # the four above, as GitHub Actions runs them
 uv run pre-commit install   # run the checks on every commit
 ```
 
 Tests run without network access, model downloads or API keys: the
 fixtures in `tests/conftest.py` install hermetic settings with the hash
 embedder and the embedding cache disabled. GitHub Actions runs lint, type
-check and tests, then builds the container image, validates the compose
-file and checks `/health` and `/ready` on a running container.
+check, tests and the MCP latency example (which drives a real
+`recallmcp-mcp` child process over stdio), then builds the container
+image, validates the compose file and checks `/health` and `/ready` on a
+running container.
 
 ## Known limitations
 

@@ -38,6 +38,9 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=ragsvc --cov-report=term-missing
 
+      - name: MCP tool latency (in-process and over stdio)
+        run: uv run python examples/mcp_latency.py
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
