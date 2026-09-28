@@ -99,6 +99,37 @@ def hybrid_merge(
     return sorted(merged.items(), key=lambda item: item[1]["score"], reverse=True)
 
 
+def hybrid_round(query: str, top_k: int, alpha: float) -> RankedDocs:
+    """One dense + BM25 round for ``query``, merged and cut to the best ``top_k``."""
+    query_embedding = encode_query(query)
+    sem_docs, sem_ids, sem_metas = vector_store.search(query_embedding, k=top_k)
+    semantic = {"ids": [sem_ids], "documents": [sem_docs], "metadatas": [sem_metas]}
+    bm25_res = bm25_manager.search(query, top_k=top_k)
+    return hybrid_merge(semantic, bm25_res, alpha=alpha)[:top_k]
+
+
+def search_chunks(query: str, top_k: int | None = None) -> RankedDocs:
+    """Retrieve the chunks that best match ``query``, best first, with scores.
+
+    One hybrid round (``RAG_RETRIEVAL_TOP_K`` candidates from FAISS and
+    BM25, merged with ``RAG_HYBRID_ALPHA``) followed by the configured
+    reranker; ``top_k`` defaults to ``RAG_RERANK_TOP_K``. With
+    ``RAG_RERANK_METHOD=none`` the scores are the hybrid scores. There is no
+    query rewriting and no generation, so this never calls an LLM: it is
+    the read path of the demo and of retrieval evaluation.
+    """
+    settings = get_settings()
+    if top_k is None:
+        top_k = settings.rerank_top_k
+    hybrid = hybrid_round(query, settings.retrieval_top_k, settings.hybrid_alpha)
+    if not hybrid or settings.rerank_method == "none":
+        return hybrid[:top_k]
+    ids = [doc_id for doc_id, _ in hybrid]
+    docs = [data["content"] for _, data in hybrid]
+    metas = [data["metadata"] for _, data in hybrid]
+    return rerank_results(query, docs, ids, metas, top_k=top_k)[:top_k]
+
+
 def _build_rewrite_prompt(initial_query: str, summary: str) -> str:
     return f"""You are a query optimization assistant. Decide whether a follow-up search is needed.
 
@@ -174,16 +205,10 @@ def recursive_retrieval(
         if enable_web_search and check_serpapi_key():
             web_texts = _web_search_round(query, seen_web_sources, all_contexts, all_doc_ids, all_metadata)
 
-        query_embedding = encode_query(query)
-        sem_docs, sem_ids, sem_metas = vector_store.search(query_embedding, k=retrieval_top_k)
-        semantic = {"ids": [sem_ids], "documents": [sem_docs], "metadatas": [sem_metas]}
-
-        bm25_res = bm25_manager.search(query, top_k=retrieval_top_k)
-
-        hybrid = hybrid_merge(semantic, bm25_res, alpha=settings.hybrid_alpha)
-        ids_iter = [doc_id for doc_id, _ in hybrid[:retrieval_top_k]]
-        docs_iter = [data["content"] for _, data in hybrid[:retrieval_top_k]]
-        meta_iter = [data["metadata"] for _, data in hybrid[:retrieval_top_k]]
+        hybrid = hybrid_round(query, retrieval_top_k, settings.hybrid_alpha)
+        ids_iter = [doc_id for doc_id, _ in hybrid]
+        docs_iter = [data["content"] for _, data in hybrid]
+        meta_iter = [data["metadata"] for _, data in hybrid]
 
         reranked: RankedDocs = []
         if docs_iter:
