@@ -130,6 +130,13 @@ restarts at 0.1.0.
 
 ### Fixed
 
+- On macOS the API and the MCP server aborted with `OMP: Error #15`
+  (`libomp.dylib` already initialized) on the first search or question with
+  the default sentence-transformers embedder: `faiss-cpu` and `torch` each
+  bundle their own OpenMP runtime. `import ragsvc` now sets
+  `KMP_DUPLICATE_LIB_OK=TRUE` before either library loads unless the
+  variable is already set; `tests/test_openmp_runtime.py` checks it in a
+  fresh interpreter and, when torch is installed, loads both libraries.
 - The unauthenticated API bound `0.0.0.0` and answered every CORS preflight
   with the caller's origin reflected and `allow-credentials: true`, so any web
   page the operator visited could read answers to private documents, replace

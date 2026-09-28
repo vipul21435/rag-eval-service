@@ -152,6 +152,14 @@ from the Hugging Face Hub. Answers need an LLM: a local
 OpenAI-compatible endpoint configured through `RAG_OPENAI_*`; with neither,
 `/api/ask` returns `502` and everything else works.
 
+On macOS `faiss-cpu` and `torch` each bundle their own copy of the LLVM
+OpenMP runtime, and the second one to load (torch, on the first neural
+embedding) aborts the process with `OMP: Error #15` unless the runtime is
+told to tolerate the duplicate. `import ragsvc` sets
+`KMP_DUPLICATE_LIB_OK=TRUE` when the variable is unset, so the API and the
+MCP server survive their first search; an explicit value in the
+environment wins. The hash embedder never loads torch and is unaffected.
+
 ### Docker
 
 ```bash

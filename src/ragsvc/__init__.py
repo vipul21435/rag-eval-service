@@ -9,6 +9,16 @@ Importing ``ragsvc`` is cheap: model libraries are loaded lazily by the
 modules that need them.
 """
 
+import os
+
 __version__ = "0.1.0"
+
+# faiss-cpu and torch each bundle their own copy of the LLVM OpenMP runtime
+# on macOS. The second one to load (torch, when the sentence-transformers
+# embedder first runs) aborts the process with "OMP: Error #15" unless the
+# runtime is told to tolerate the duplicate. This runs before either library
+# is imported anywhere in the package; an explicit value in the environment
+# wins.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 __all__ = ["__version__"]
