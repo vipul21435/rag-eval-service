@@ -259,7 +259,7 @@ sample file and a first `search` of 16 ms inside the container.
 | `make mcp-latency` (`examples/mcp_latency.py`) | Time the four tools in-process and over a real stdio child process (offline, hash embedder); CI runs it too |
 | `make demo` | Run `examples/demo.py`: ingest `examples/docs/`, re-ingest, three timed queries, cache counters |
 | `make eval` (`examples/eval_retrieval.py`) | Score `examples/eval/golden.v1.jsonl` in dense-only and hybrid mode, write `eval-reports/retrieval-eval.{json,md}`, exit 1 below a threshold in `examples/eval/thresholds.toml` (offline, hash embedder) |
-| `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is lint, typecheck, test and mcp-latency, what GitHub Actions runs |
+| `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is lint, typecheck, test, eval and mcp-latency, what GitHub Actions runs |
 | `make docker-build`, `make docker-up` | Build `recallmcp:dev`; start it with compose |
 
 ### HTTP API

@@ -29,7 +29,7 @@ eval:  ## Score the golden set in dense-only and hybrid mode; writes eval-report
 mcp-latency:  ## Time the MCP tools in-process and over a real stdio child process (offline)
 	$(UV) run python examples/mcp_latency.py
 
-ci: lint typecheck test mcp-latency  ## What GitHub Actions runs
+ci: lint typecheck test eval mcp-latency  ## What GitHub Actions runs
 
 docker-build:  ## Build the container image
 	docker build -t recallmcp:dev .
