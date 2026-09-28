@@ -8,6 +8,14 @@ restarts at 0.1.0.
 
 ### Added
 
+- A retrieval evaluation harness (`ragsvc.eval`): `recall_at_k`,
+  `reciprocal_rank` and `ndcg_at_k` with binary relevance, a versioned
+  JSONL golden set (`examples/eval/golden.v1.jsonl`, 12 queries over the
+  sample documents), thresholds in `examples/eval/thresholds.toml`,
+  `make eval` (`examples/eval_retrieval.py`) writing
+  `eval-reports/retrieval-eval.{json,md}` for dense-only and hybrid
+  retrieval and exiting 1 below a threshold, and `tests/test_eval_gate.py`
+  failing the suite on a regression. Offline, hash embedder.
 - An MCP server (`ragsvc.mcp_server`, console script `recallmcp-mcp`) on the
   official `mcp` package with the stdio transport, exposing
   `ingest_document`, `search`, `list_documents` and `health` over the same

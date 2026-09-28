@@ -42,6 +42,11 @@ Fork work only (`git log --author=vipul21435@iiitd.ac.in`):
   configured reranker, no LLM) shared by the demo and the recursive
   retriever, and `make demo`: three bundled documents, a re-index that
   shows the cache working, three timed queries; under ten seconds, offline.
+- A retrieval evaluation harness (`ragsvc.eval`): recall@k, MRR and nDCG@k
+  with hand-checked tests, a versioned JSONL golden set of 12 queries over
+  the bundled documents, `make eval` scoring dense-only against hybrid
+  retrieval into JSON and Markdown reports, and a pytest gate that fails
+  when a mean drops below `examples/eval/thresholds.toml`.
 - An MCP server (`recallmcp-mcp`, the official `mcp` package, stdio
   transport) exposing `ingest_document`, `search`, `list_documents` and
   `health` as tools over the same core and `RAG_` settings as the API;
@@ -253,6 +258,7 @@ sample file and a first `search` of 16 ms inside the container.
 | `uv run recallmcp-mcp` (or `python -m ragsvc.mcp_server`) | Serve the MCP tools on stdio; documents are read from `RAG_MCP_DOCUMENT_ROOT` |
 | `make mcp-latency` (`examples/mcp_latency.py`) | Time the four tools in-process and over a real stdio child process (offline, hash embedder); CI runs it too |
 | `make demo` | Run `examples/demo.py`: ingest `examples/docs/`, re-ingest, three timed queries, cache counters |
+| `make eval` (`examples/eval_retrieval.py`) | Score `examples/eval/golden.v1.jsonl` in dense-only and hybrid mode, write `eval-reports/retrieval-eval.{json,md}`, exit 1 below a threshold in `examples/eval/thresholds.toml` (offline, hash embedder) |
 | `make install`, `make lint`, `make typecheck`, `make test`, `make ci` | The developer loop; `ci` is lint, typecheck, test and mcp-latency, what GitHub Actions runs |
 | `make docker-build`, `make docker-up` | Build `recallmcp:dev`; start it with compose |
 
@@ -344,12 +350,36 @@ through the same cache, which is why a warm query is a cache lookup plus a
 FAISS and a BM25 search. Scores are hybrid scores (`0.7 * dense rank score
 + 0.3 * normalised BM25`), so `1.000` means first in both retrievers.
 
+`make eval` prints the summary of the Markdown report it writes (the
+per-query table is in the file):
+
+```text
+# Retrieval evaluation: golden.v1.jsonl
+
+Embedder: `hash`, hybrid alpha: 0.7, k: 3.
+
+| Mode | Recall@3 | MRR | nDCG@3 |
+| --- | --- | --- | --- |
+| dense | 1.000 | 0.917 | 0.938 |
+| hybrid | 1.000 | 1.000 | 1.000 |
+
+12 queries over 22 chunks in 55 ms;
+reports written to eval-reports/retrieval-eval.json and retrieval-eval.md
+```
+
+Relevance is at the document level: each golden query names the sample
+document(s) it should be answered from, and the ranked chunks are collapsed
+to their source documents in rank order before scoring. With three
+documents and ten candidates per retriever, recall@3 is saturated; MRR and
+nDCG@3 are the numbers that separate the two modes.
+
 ## Benchmarks
 
 Measured on 2026-09-29 on this machine (Apple Silicon Mac, 8 cores, 8 GB
 RAM, Python 3.12, `uv 0.11.29`, Docker 29). Hash embedder (256
-dimensions), no reranker, exact `IndexFlatL2`; nothing here says anything
-about retrieval quality, which the hash embedder does not have.
+dimensions), no reranker, exact `IndexFlatL2`. The first table is speed;
+the second is retrieval quality on the bundled golden set, which is small
+and easy on purpose: it exists to catch regressions, not to rank embedders.
 
 | Measurement | Command | Result |
 | --- | --- | --- |
@@ -360,9 +390,25 @@ about retrieval quality, which the hash embedder does not have.
 | Whole demo, wall clock | `time make demo` | 0.5 s with a warm virtualenv (interpreter start-up and imports are most of it) |
 | MCP tool call, in-process client session | `uv run python examples/mcp_latency.py` | `search` p50 0.48 ms, p95 0.75 ms over 50 calls; `list_documents` p50 0.33 ms; `health` p50 0.37 ms; `ingest_document` of an 8-chunk file 36 ms |
 | MCP tool call over stdio to a child process | `uv run python examples/mcp_latency.py` | `search` p50 0.88 ms, p95 1.02 ms over 20 calls; `health` p50 0.73 ms; spawn plus `initialize` 666 ms; the whole script 1.9 s |
-| Test suite | `uv run pytest --cov=ragsvc` | 184 tests in 2.7 s (one runs the demo in a subprocess), 86% line coverage |
+| Test suite | `uv run pytest --cov=ragsvc` | 216 tests in 5.4 s (three run the demo or the eval script in a subprocess), 88% line coverage |
 | Fresh clone, `neural` extra included | `make install`, `make demo`, `make test` | 1.8 s (warm uv cache, 1.0 GB virtualenv), 3.2 s for the first `make demo` (uv builds the project; 0.4 s on the second run), 4.3 s |
 | Container image | `docker build -t recallmcp:dev .` | 96 MB compressed content (`docker image inspect --format '{{.Size}}'` reports about 96.1 million bytes, 3 MB of it the `mcp` package), 419 MB unpacked on disk (`docker images`); 21 s with a warm layer cache, 30 s from an empty one (base image already pulled) |
+
+Retrieval quality, `make eval` over `examples/eval/golden.v1.jsonl` (12
+queries, 3 documents, 22 chunks; hash embedder, `RAG_HYBRID_ALPHA=0.7`,
+document-level relevance, k = 3; 0.437 s wall clock including interpreter
+start-up):
+
+| Mode | Recall@3 | MRR | nDCG@3 | Gate minimum (recall / MRR / nDCG) |
+| --- | --- | --- | --- | --- |
+| Dense only (FAISS) | 1.000 | 0.917 | 0.938 | 0.90 / 0.85 / 0.85 |
+| Hybrid (`0.7 * dense + 0.3 * BM25`) | 1.000 | 1.000 | 1.000 | 0.95 / 0.95 / 0.95 |
+
+Dense-only ranks the wrong document first on two of the twelve queries
+("How are dense and BM25 scores combined?" and the container question);
+the BM25 term matches on `BM25`, `non-root` and `/data` fix both. The
+gate (`tests/test_eval_gate.py`) recomputes this table on every test run
+and fails below the minimums in `examples/eval/thresholds.toml`.
 
 ## Design decisions
 
@@ -506,13 +552,18 @@ src/ragsvc/
     reranker.py            Result reranking
     generator.py           Context building and answer generation
     ingest.py              Ingestion pipeline shared by all entry points
+  eval/
+    metrics.py             recall@k, MRR, nDCG@k and macro averages
+    harness.py             Golden set and thresholds parsing, dense vs hybrid scoring, reports
   features/                Web search, conflict detection, reasoning-block splitting
   utils/                   HTTP session and port helpers
 examples/
   demo.py                  `make demo`
   mcp_latency.py           MCP tool-call latency, in-process and over stdio
+  eval_retrieval.py        `make eval`
+  eval/                    golden.v1.jsonl (12 labelled queries) and thresholds.toml
   docs/                    Three sample Markdown documents
-tests/                     184 tests that need no network access or credentials
+tests/                     216 tests that need no network access or credentials
 Dockerfile, docker-compose.yml, Makefile, .github/workflows/ci.yml
 ```
 
@@ -553,17 +604,17 @@ running container.
 
 ## What I would do next
 
-- A retrieval evaluation harness: a labelled query set over
-  `examples/docs/`, `recall@k`, MRR and nDCG computed through
-  `search_chunks`, reported per embedder and reranker, with a CI gate that
-  fails on regression.
+- Grow the evaluation: chunk-level labels, a larger and harder golden
+  set, and `make eval` runs with the neural embedder and the cross-encoder
+  reranker (behind the `neural` extra, off by default) so the benchmarks
+  table compares embedders rather than only dense against hybrid.
 - Ingestion improvements: pluggable chunkers (sentence and Markdown-aware),
   MinHash near-duplicate detection across documents and a collision ledger
   for the embedding cache.
 - Reciprocal rank fusion as an alternative to the weighted hybrid merge,
   and a query cache in front of `search_chunks`.
 - Agent tasks with pytest graders that score an agent's answers against
-  the labelled query set.
+  the golden set.
 - A Typer CLI (`recallmcp ingest`, `recallmcp search`, `recallmcp serve`)
   over the Python API.
 
