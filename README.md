@@ -88,6 +88,10 @@ uv run recallmcp           # or: uv run python -m ragsvc
 The API listens on `127.0.0.1` and the first free port in `17995-17999`
 (`RAG_API_HOST`, `RAG_API_PORT`). Main endpoints:
 
+- `GET /health`: liveness plus the version, the LLM, embedding and
+  reranker provider names, the index size and the embedding cache's hit and
+  miss counters; it never loads a model. `GET /ready` answers `200` once
+  documents are indexed and `503` before. Neither needs the API token;
 - `GET /api/status`: runtime and provider configuration status;
 - `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
   XLS/XLSX with the `documents` extra) and rebuild the indexes from it.
@@ -219,6 +223,9 @@ check and tests on every push and pull request.
 - The embedding cache lives in SQLite (one file, standard library only)
   and is keyed by provider and model as well as text, so changing
   `RAG_EMBED_MODEL_NAME` can never serve vectors from the old model.
+- `/ready` means "ready to answer questions", so it stays `503` until
+  something is indexed; `/health` is the liveness signal and reports
+  configuration without touching models or providers.
 
 ## Known limitations
 

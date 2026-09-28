@@ -30,7 +30,7 @@ TEST_SETTINGS: dict[str, object] = {
 }
 
 
-def test_settings(**overrides: object) -> Settings:
+def make_settings(**overrides: object) -> Settings:
     """A hermetic ``Settings`` with the suite defaults under ``overrides``."""
     return Settings(_env_file=None, **{**TEST_SETTINGS, **overrides})  # type: ignore[arg-type]
 
@@ -41,7 +41,7 @@ def hermetic_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[Settings]:
     for name in list(os.environ):
         if name.startswith("RAG_") or name in _UNPREFIXED_VARIABLES:
             monkeypatch.delenv(name)
-    defaults = test_settings()
+    defaults = make_settings()
     set_settings(defaults)
     set_embedder(None)
     yield defaults
@@ -54,7 +54,7 @@ def settings() -> Callable[..., Settings]:
     """Factory installing settings with the given field overrides for the test."""
 
     def install(**overrides: object) -> Settings:
-        installed = test_settings(**overrides)
+        installed = make_settings(**overrides)
         set_settings(installed)
         return installed
 

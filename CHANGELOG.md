@@ -16,6 +16,10 @@ restarts at 0.1.0.
   by provider, model and text hash, with hit and miss counters. Selected
   with `RAG_EMBEDDING_PROVIDER`, `RAG_HASH_EMBEDDING_DIMENSION`,
   `RAG_EMBEDDING_CACHE_ENABLED` and `RAG_EMBEDDING_CACHE_PATH`.
+- `GET /health` (status, version, LLM, embedding and reranker provider names,
+  index size, embedding cache counters; never loads a model) and
+  `GET /ready` (`200` once documents are indexed, `503` before), both outside
+  `/api` so they need no token.
 - `core/ingest.py`: a typed ingestion pipeline (extract, chunk, embed, index)
   that returns a structured per-file report and is shared by every entry point.
 - `pyproject.toml` with a committed `uv.lock` on Python 3.12; torch comes from

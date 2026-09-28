@@ -1,8 +1,10 @@
-"""REST API: FastAPI application exposing upload, ask and status endpoints.
+"""REST API: FastAPI application exposing upload, ask, status and health endpoints.
 
 Security defaults are local-first: the server binds the loopback interface,
 sends no CORS headers, caps upload size and, when ``RAG_API_TOKEN`` is set,
 requires a bearer token on every ``/api`` request. See ``ragsvc.config``.
+``GET /health`` and ``GET /ready`` are outside ``/api`` and never need the
+token, so liveness and readiness probes can reach them.
 
 ``create_app`` is the application factory; there is no module-level app so
 that settings are read when the application is built, not when the module
@@ -19,18 +21,28 @@ import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ragsvc import __version__
-from ragsvc.config import Provider, Settings, detect_default_provider, get_settings, resolve_provider
+from ragsvc.config import (
+    Provider,
+    Settings,
+    detect_default_provider,
+    get_settings,
+    resolve_provider,
+    set_settings,
+)
 from ragsvc.core.document_loader import SUPPORTED_EXTENSIONS, describe_supported_formats
+from ragsvc.core.embeddings import get_embedder
 from ragsvc.core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
 from ragsvc.core.ingest import SourceFile, ingest_files
 from ragsvc.core.vector_store import vector_store
+from ragsvc.embeddings import CachedEmbedder
 
 logger = logging.getLogger("rag-api")
 
@@ -84,6 +96,43 @@ class FileProcessResult(BaseModel):
     status: str
     message: str
     file_info: dict[str, Any] | None = None
+
+
+class ProviderNames(BaseModel):
+    llm: str = Field(description="Default LLM provider, resolved once at startup")
+    embedding: str = Field(description="Embedding provider family: hash or sentence-transformers")
+    embedding_model: str
+    reranker: str = Field(description="cross_encoder, llm or none")
+    reranker_model: str | None = None
+
+
+class IndexInfo(BaseModel):
+    ready: bool
+    chunks: int
+    type: str | None = Field(default=None, description="FAISS index type, once built")
+
+
+class EmbeddingCacheInfo(BaseModel):
+    enabled: bool
+    entries: int = 0
+    hits: int = 0
+    misses: int = 0
+
+
+class HealthResponse(BaseModel):
+    """Liveness plus a snapshot of what the process is configured with."""
+
+    status: Literal["ok"] = "ok"
+    version: str
+    providers: ProviderNames
+    index: IndexInfo
+    embedding_cache: EmbeddingCacheInfo
+
+
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
+    chunks: int
+    reason: str | None = None
 
 
 # --- Routes -----------------------------------------------------------------
@@ -187,6 +236,52 @@ async def check_status(settings: Annotated[Settings, Depends(app_settings)]) -> 
     }
 
 
+# --- Health ---------------------------------------------------------------------
+
+ops_router = APIRouter(tags=["health"])
+
+
+@ops_router.get("/health", response_model=HealthResponse)
+async def health(settings: Annotated[Settings, Depends(app_settings)]) -> HealthResponse:
+    """Liveness: the process is up, and what it is running with.
+
+    Cheap by construction: it names the embedding provider and model without
+    loading the model, and reads the cache counters without embedding.
+    """
+    embedder = get_embedder()
+    cache = EmbeddingCacheInfo(enabled=False)
+    if isinstance(embedder, CachedEmbedder):
+        stats = embedder.cache.stats
+        cache = EmbeddingCacheInfo(enabled=True, entries=stats.entries, hits=stats.hits, misses=stats.misses)
+    index = vector_store.index
+    return HealthResponse(
+        version=__version__,
+        providers=ProviderNames(
+            llm=detect_default_provider(),
+            embedding=embedder.name,
+            embedding_model=embedder.model_name,
+            reranker=settings.rerank_method,
+            reranker_model=settings.rerank_model_name if settings.rerank_method == "cross_encoder" else None,
+        ),
+        index=IndexInfo(
+            ready=vector_store.is_ready, chunks=vector_store.total_chunks, type=index and index.index_type
+        ),
+        embedding_cache=cache,
+    )
+
+
+@ops_router.get("/ready", response_model=ReadyResponse, responses={503: {"model": ReadyResponse}})
+async def ready() -> JSONResponse:
+    """Readiness to answer questions: 200 once documents are indexed, 503 before."""
+    chunks = vector_store.total_chunks
+    if chunks == 0:
+        body = ReadyResponse(
+            status="not_ready", chunks=0, reason="knowledge base is empty; upload documents first"
+        )
+        return JSONResponse(status_code=503, content=body.model_dump())
+    return JSONResponse(content=ReadyResponse(status="ready", chunks=chunks).model_dump())
+
+
 # --- Application ------------------------------------------------------------
 
 
@@ -206,6 +301,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application from ``settings`` (default: the process-wide settings).
 
+    Explicit ``settings`` become the process-wide settings: the pipeline
+    modules and the embedding provider read those, and the app must agree
+    with them.
+
     ``settings.cors_allow_origins`` lists the browser origins allowed to call
     the API. With no origins, no CORS middleware is installed and browsers
     block cross-origin reads. Credentials are never allowed, so an allowed
@@ -213,6 +312,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = get_settings()
+    elif settings is not get_settings():
+        set_settings(settings)
     application = FastAPI(
         title="RecallMCP",
         description="Document question answering over local FAISS + BM25 hybrid retrieval",
@@ -229,4 +330,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Authorization", "Content-Type"],
         )
     application.include_router(router)
+    application.include_router(ops_router)
     return application
