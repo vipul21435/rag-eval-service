@@ -55,6 +55,15 @@ restarts at 0.1.0.
   was lost and every remaining retrieval round searched for `""`. Reasoning
   blocks are now removed wherever they appear, and an empty rewrite ends the
   loop.
+- A failed upload wiped the knowledge base: ingestion cleared both indexes
+  before knowing whether any file would parse, so an unsupported extension,
+  a non-UTF-8 text file, a missing optional parser or an embedding error left
+  the service empty while `/api/upload` answered `200` with `status: error`.
+  The new indexes are now built first and swapped in only when at least one
+  chunk was produced. `/api/upload` rejects unsupported extensions with `415`
+  before reading the body, and the loader reports an unsupported format, a
+  missing `documents` extra and a non-UTF-8 text file with distinct messages
+  instead of the misleading "document is empty".
 - Two uploads running at the same time corrupted the dense index:
   `VectorStore.build_index` appended to the live id list while replacing the
   FAISS index, so positions mapped to the wrong chunks, and nothing stopped

@@ -24,6 +24,7 @@ from config import (
     is_configured_api_key,
     resolve_provider,
 )
+from core.document_loader import SUPPORTED_EXTENSIONS, describe_supported_formats
 from core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
 from core.ingest import SourceFile, ingest_files
 from core.vector_store import vector_store
@@ -80,9 +81,17 @@ class FileProcessResult(BaseModel):
 
 @app.post("/api/upload", response_model=FileProcessResult)
 async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
-    """Index one document, replacing the current knowledge base."""
+    """Index one document, replacing the current knowledge base.
+
+    A document that yields no text leaves the previous knowledge base in
+    place and is reported with ``status: error``.
+    """
     filename = file.filename or "upload"
     suffix = os.path.splitext(filename)[1]
+    if suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            415, f"unsupported file format {suffix or '(none)'!r}; supported: {describe_supported_formats()}"
+        )
     tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:

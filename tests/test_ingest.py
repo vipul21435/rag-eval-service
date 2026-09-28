@@ -150,10 +150,64 @@ def test_concurrent_ingests_are_serialized_and_leave_a_consistent_store(tmp_path
     assert bm25_manager.search("bravo three", top_k=1)[0]["id"] == "doc_3_chunk_0"
 
 
-def test_ingest_with_no_sources_leaves_empty_indexes():
+def test_ingest_with_no_sources_leaves_indexes_untouched():
     report = ingest_files([])
 
     assert report.files == []
     assert report.total_chunks == 0
     assert not report.succeeded
     assert not vector_store.is_ready
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "expected_error"),
+    [
+        ("report.csv", b"a,b\n1,2\n", "unsupported file format '.csv'"),
+        ("latin1.txt", "caf\u00e9".encode("latin-1"), "not UTF-8"),
+        ("blank.md", b"   \n", "no extractable text"),
+    ],
+)
+def test_failed_run_keeps_the_previous_knowledge_base(tmp_path: Path, name, content, expected_error):
+    seed_knowledge_base(tmp_path)
+    bad = tmp_path / name
+    bad.write_bytes(content)
+
+    report = ingest_files([SourceFile.from_path(bad)])
+
+    assert not report.succeeded
+    assert report.total_chunks == 0
+    assert expected_error in (report.files[0].error or "")
+    assert_seeded_knowledge_base_intact()
+
+
+def test_embedding_failure_keeps_the_previous_knowledge_base(tmp_path: Path, monkeypatch):
+    seed_knowledge_base(tmp_path)
+    replacement = write_text(tmp_path, "new.md", "Replacement knowledge base.")
+
+    def failing_encode(texts, show_progress=False):
+        raise RuntimeError("model download failed")
+
+    monkeypatch.setattr(ingest, "encode_texts", failing_encode)
+
+    with pytest.raises(RuntimeError, match="model download failed"):
+        ingest_files([SourceFile.from_path(replacement)])
+
+    assert_seeded_knowledge_base_intact()
+
+
+def seed_knowledge_base(tmp_path: Path) -> None:
+    """Index three documents; BM25 needs at least three for a positive IDF."""
+    report = ingest_files(
+        [
+            SourceFile.from_path(write_text(tmp_path, "faiss.md", "FAISS supports dense vector retrieval.")),
+            SourceFile.from_path(write_text(tmp_path, "bm25.md", "BM25 supports exact keyword retrieval.")),
+            SourceFile.from_path(write_text(tmp_path, "rag.md", "RAG combines retrieval with generation.")),
+        ]
+    )
+    assert report.succeeded
+
+
+def assert_seeded_knowledge_base_intact() -> None:
+    assert vector_store.is_ready and vector_store.total_chunks == 3
+    assert vector_store.contents_map["doc_2_chunk_0"] == "BM25 supports exact keyword retrieval."
+    assert bm25_manager.search("BM25 keyword", top_k=1)[0]["id"] == "doc_2_chunk_0"

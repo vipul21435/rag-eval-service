@@ -57,7 +57,9 @@ The API listens on the first free port in `17995-17999`. Main endpoints:
 
 - `GET /api/status`: runtime and provider configuration status;
 - `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
-  XLS/XLSX with the `documents` extra) and rebuild the indexes from it;
+  XLS/XLSX with the `documents` extra) and rebuild the indexes from it.
+  Other formats get `415`; a document that yields no text is reported with
+  `status: error` and leaves the previous knowledge base in place;
 - `POST /api/ask`: ask a question against the indexed documents
   (`{"question": "...", "provider": "ollama" | "openai" | null}`); answers
   are plain text and carry the source documents, whether the sources

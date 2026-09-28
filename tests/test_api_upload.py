@@ -40,6 +40,21 @@ def test_upload_returns_chunk_count_and_removes_temp_file(client, monkeypatch):
     assert not os.path.exists(str(seen["path"]))
 
 
+@pytest.mark.parametrize("filename", ["report.csv", "archive", "image.PNG"])
+def test_upload_rejects_unsupported_formats_before_ingesting(client, monkeypatch, filename):
+    def unexpected_ingest(sources, progress=None):
+        raise AssertionError("an unsupported format must be rejected before ingestion starts")
+
+    monkeypatch.setattr(api_router, "ingest_files", unexpected_ingest)
+
+    response = client.post("/api/upload", files={"file": (filename, b"payload", "application/octet-stream")})
+
+    assert response.status_code == 415
+    detail = response.json()["detail"]
+    assert detail.startswith("unsupported file format")
+    assert ".pdf" in detail and ".md" in detail
+
+
 def test_upload_reports_parse_failures_as_error_status(client, monkeypatch):
     monkeypatch.setattr(
         api_router,

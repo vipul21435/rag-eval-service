@@ -81,19 +81,21 @@ def ingest_files(
 ) -> IngestReport:
     """Rebuild the vector and BM25 indexes from ``sources``.
 
-    The existing indexes are cleared first: an ingestion run replaces the
-    whole knowledge base rather than appending to it. Files that fail to
-    parse are reported individually and do not abort the run. Runs are
-    serialized process-wide; a concurrent call waits for the current one.
+    An ingestion run replaces the whole knowledge base rather than appending
+    to it, but only once it has something to replace it with: the new
+    indexes are built off to the side and swapped in when at least one file
+    produced chunks. A run in which every file fails (unsupported format,
+    empty document, missing parser, embedding error) leaves the previous
+    knowledge base untouched. Files that fail to parse are reported
+    individually and do not abort the run. Runs are serialized process-wide;
+    a concurrent call waits for the current one.
     """
     with _INGEST_LOCK:
         return _ingest_files_locked(sources, progress)
 
 
 def _ingest_files_locked(sources: Sequence[SourceFile], progress: ProgressCallback | None) -> IngestReport:
-    _notify(progress, 0.0, "Clearing existing indexes")
-    vector_store.clear()
-    bm25_manager.clear()
+    _notify(progress, 0.0, "Starting ingestion")
 
     results: list[FileResult] = []
     all_chunks: list[str] = []
@@ -119,13 +121,17 @@ def _ingest_files_locked(sources: Sequence[SourceFile], progress: ProgressCallba
         all_metadatas.extend({"source": source.name, "doc_id": doc_id} for _ in chunks)
         results.append(FileResult(name=source.name, chunks=len(chunks)))
 
-    if all_chunks:
-        _notify(progress, 0.8, "Encoding chunks")
-        embeddings = encode_texts(all_chunks)
-        _notify(progress, 0.9, "Building FAISS index")
-        vector_store.build_index(all_chunks, all_ids, all_metadatas, embeddings)
-        _notify(progress, 0.95, "Building BM25 index")
-        bm25_manager.build_index(all_chunks, all_ids)
+    if not all_chunks:
+        _notify(progress, 1.0, "Done")
+        logger.warning("No chunks produced from %d file(s); keeping the previous knowledge base", total)
+        return IngestReport(files=results, total_chunks=0)
+
+    _notify(progress, 0.8, "Encoding chunks")
+    embeddings = encode_texts(all_chunks)
+    _notify(progress, 0.9, "Building FAISS index")
+    vector_store.build_index(all_chunks, all_ids, all_metadatas, embeddings)
+    _notify(progress, 0.95, "Building BM25 index")
+    bm25_manager.build_index(all_chunks, all_ids)
 
     _notify(progress, 1.0, "Done")
     logger.info("Ingested %d file(s) into %d chunk(s)", total, len(all_chunks))
