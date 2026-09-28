@@ -3,7 +3,7 @@
 Semantically similar texts end up close together, which is what the FAISS
 index searches on. The default model (``all-MiniLM-L6-v2``, 384 dimensions,
 about 80 MB) is English-oriented and fast on CPU; it is downloaded from the
-Hugging Face Hub on first use. Override it with ``EMBED_MODEL_NAME``.
+Hugging Face Hub on first use. Override it with ``RAG_EMBED_MODEL_NAME``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from ragsvc.config import EMBED_MODEL_NAME
+from ragsvc.config import get_settings
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
@@ -29,8 +29,9 @@ def get_embed_model() -> SentenceTransformer:
     """Load the embedding model once and cache the instance."""
     from sentence_transformers import SentenceTransformer
 
-    logger.info("Loading embedding model: %s", EMBED_MODEL_NAME)
-    model = SentenceTransformer(EMBED_MODEL_NAME)
+    model_name = get_settings().embed_model_name
+    logger.info("Loading embedding model: %s", model_name)
+    model = SentenceTransformer(model_name)
     logger.info("Embedding model loaded; dimension: %s", model.get_sentence_embedding_dimension())
     return model
 

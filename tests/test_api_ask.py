@@ -8,7 +8,7 @@ from ragsvc.core.generator import Answer, KnowledgeBaseEmptyError, ProviderError
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(api, "detect_default_provider", lambda: "ollama")
-    return TestClient(api.app)
+    return TestClient(api.create_app())
 
 
 def test_ask_returns_answer_sources_and_metadata(client, monkeypatch):

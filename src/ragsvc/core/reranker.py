@@ -14,7 +14,7 @@ import threading
 from functools import lru_cache
 from typing import TYPE_CHECKING, TypedDict
 
-from ragsvc.config import OLLAMA_BASE_URL, OLLAMA_MODEL, RERANK_METHOD, RERANK_MODEL_NAME
+from ragsvc.config import get_settings
 from ragsvc.core.vector_store import Metadata
 
 if TYPE_CHECKING:
@@ -45,8 +45,9 @@ def get_cross_encoder() -> CrossEncoder | None:
                 try:
                     from sentence_transformers import CrossEncoder
 
-                    _cross_encoder = CrossEncoder(RERANK_MODEL_NAME)
-                    logger.info("Cross-encoder loaded: %s", RERANK_MODEL_NAME)
+                    model_name = get_settings().rerank_model_name
+                    _cross_encoder = CrossEncoder(model_name)
+                    logger.info("Cross-encoder loaded: %s", model_name)
                 except Exception as exc:  # noqa: BLE001 - model download or load failure
                     logger.error("Failed to load cross-encoder: %s", exc)
                     _cross_encoder = None
@@ -96,10 +97,11 @@ Query: {query}
 Document excerpt: {doc}
 Relevance score (0-10):"""
 
+    settings = get_settings()
     try:
         response = get_session().post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            f"{settings.ollama_base_url}/api/generate",
+            json={"model": settings.ollama_model, "prompt": prompt, "stream": False},
             timeout=180,
         )
         result = str(response.json().get("response", "")).strip()
@@ -142,7 +144,7 @@ def rerank_results(
 ) -> RankedDocs:
     """Rerank with ``method``: ``cross_encoder`` or ``llm``; any other value keeps the input order."""
     if method is None:
-        method = RERANK_METHOD
+        method = get_settings().rerank_method
 
     if method == "llm":
         return rerank_with_llm(query, docs, doc_ids, metadata_list, top_k)

@@ -19,6 +19,15 @@ restarts at 0.1.0.
 
 ### Changed
 
+- Configuration is a typed, validated `Settings` object (pydantic-settings)
+  read from `RAG_`-prefixed environment variables and a `.env` file in the
+  working directory, instead of module-level constants read at import time.
+  Out-of-range values and unknown provider names fail at startup with the
+  variable named; secrets are `SecretStr` values that never appear in
+  `repr`. `OPENAI_API_KEY`, `OPENAI_BASE_URL` and `SERPAPI_KEY` are still
+  accepted under their conventional names. `create_app(settings)` builds the
+  API from an explicit `Settings` instance and there is no import-time
+  application object.
 - The service is an importable package, `ragsvc` under `src/`, instead of
   top-level `core/`, `features/`, `utils/`, `config.py` and `api_router.py`
   modules. `uv run ragsvc` (or `python -m ragsvc`) serves the API.

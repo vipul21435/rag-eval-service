@@ -1,97 +1,189 @@
-"""Configuration: environment loading, provider settings and retrieval hyperparameters.
+"""Typed settings: providers, models, retrieval hyperparameters and the HTTP API.
 
-Every setting has a local default, so the service runs with no ``.env`` file,
-no API keys and no network access beyond the first model download. Values
-come from the process environment, then from ``.env`` next to this file.
+Settings are read from environment variables prefixed with ``RAG_``
+(``RAG_CHUNK_SIZE``, ``RAG_OLLAMA_MODEL``, ...) and, below them, from a
+``.env`` file in the working directory. Every setting has a local default,
+so the service runs with no ``.env`` file, no API keys and no network access
+beyond the first model download. Third-party credentials are also accepted
+under their conventional unprefixed names (``OPENAI_API_KEY``,
+``OPENAI_BASE_URL``, ``SERPAPI_KEY``); the ``RAG_`` name wins when both are
+set.
+
+Validation happens once, when the settings are loaded: an out-of-range
+value or an unknown provider name fails at startup with a message naming
+the variable, not later inside a request.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-from functools import lru_cache
-from pathlib import Path
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
 
 import requests
-from dotenv import load_dotenv
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
-# Relative to the working directory, like the rest of the service's file paths.
-ENV_PATH = Path(".env")
-# Existing environment variables take precedence over .env values.
-load_dotenv(ENV_PATH)
-
-
-def _env_int(name: str, default: int) -> int:
-    return int(os.getenv(name, default))
-
-
-def _env_float(name: str, default: float) -> float:
-    return float(os.getenv(name, default))
-
-
-# --- LLM providers -----------------------------------------------------------
 # "ollama": a local Ollama server. "openai": any OpenAI-compatible Chat
 # Completions endpoint (OpenAI, vLLM, LM Studio, hosted providers).
 Provider = Literal["ollama", "openai"]
 PROVIDER_CHOICES: tuple[Provider, ...] = get_args(Provider)
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER") or None
+RerankMethod = Literal["cross_encoder", "llm", "none"]
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-# --- Retrieval models (downloaded from the Hugging Face Hub on first use) ----
-EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "all-MiniLM-L6-v2")
-RERANK_METHOD = os.getenv("RERANK_METHOD", "cross_encoder")  # cross_encoder | llm | none
-RERANK_MODEL_NAME = os.getenv("RERANK_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-
-# --- Retrieval hyperparameters ----------------------------------------------
-CHUNK_SIZE = _env_int("CHUNK_SIZE", 400)  # characters per chunk
-CHUNK_OVERLAP = _env_int("CHUNK_OVERLAP", 40)  # characters shared by adjacent chunks
-HYBRID_ALPHA = _env_float("HYBRID_ALPHA", 0.7)  # weight of dense vs. BM25 scores (0-1)
-RETRIEVAL_TOP_K = _env_int("RETRIEVAL_TOP_K", 10)  # candidates per retriever
-RERANK_TOP_K = _env_int("RERANK_TOP_K", 5)  # candidates kept after reranking
-MAX_RETRIEVAL_ITERATIONS = _env_int("MAX_RETRIEVAL_ITERATIONS", 3)  # recursive retrieval rounds
-
-# --- Optional web search -----------------------------------------------------
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
-SEARCH_ENGINE = "google"
-
-# --- HTTP API ---------------------------------------------------------------
-# The API has no authentication unless API_TOKEN is set, so it listens on the
-# loopback interface by default. Set API_HOST=0.0.0.0 to expose it, ideally
-# together with API_TOKEN.
-API_HOST = os.getenv("API_HOST", "127.0.0.1")
-# Unset: the first free port in api.CANDIDATE_PORTS is used.
-API_PORT = int(os.environ["API_PORT"]) if os.getenv("API_PORT") else None
+# Placeholder values such as ``Your_OPENAI_API_KEY`` left over from an example
+# file are treated as unset.
+_PLACEHOLDER_PREFIX = "Your"
 
 
-def _env_csv(name: str) -> tuple[str, ...]:
-    return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
+def _split_csv(value: object) -> object:
+    if isinstance(value, str):
+        return tuple(item.strip() for item in value.split(",") if item.strip())
+    return value
 
 
-# Browser origins allowed to call the API (comma-separated). Empty means no
-# CORS headers at all: pages on other origins cannot read responses.
-CORS_ALLOW_ORIGINS = _env_csv("CORS_ALLOW_ORIGINS")
-# Largest document /api/upload accepts.
-MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 50)
-# When set, every /api request must carry "Authorization: Bearer <token>".
-API_TOKEN = os.getenv("API_TOKEN") or None
+class Settings(BaseSettings):
+    """Every configurable value of the service, validated on load."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="RAG_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    # --- LLM providers ------------------------------------------------------
+    llm_provider: Provider | None = Field(
+        default=None,
+        description="Force a provider instead of auto-detecting (running Ollama, then an OpenAI key).",
+    )
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2"
+    openai_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("RAG_OPENAI_API_KEY", "OPENAI_API_KEY")
+    )
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("RAG_OPENAI_BASE_URL", "OPENAI_BASE_URL"),
+    )
+    openai_model: str = "gpt-4o-mini"
+
+    # --- Retrieval models (downloaded from the Hugging Face Hub on first use)
+    embed_model_name: str = "all-MiniLM-L6-v2"
+    rerank_method: RerankMethod = "cross_encoder"
+    rerank_model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # --- Retrieval hyperparameters ------------------------------------------
+    chunk_size: int = Field(default=400, ge=1, description="Characters per chunk.")
+    chunk_overlap: int = Field(default=40, ge=0, description="Characters shared by adjacent chunks.")
+    hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0, description="Weight of dense vs. BM25 scores.")
+    retrieval_top_k: int = Field(default=10, ge=1, description="Candidates per retriever.")
+    rerank_top_k: int = Field(default=5, ge=1, description="Candidates kept after reranking.")
+    max_retrieval_iterations: int = Field(default=3, ge=1, description="Recursive retrieval rounds.")
+
+    # --- Optional web search ------------------------------------------------
+    serpapi_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("RAG_SERPAPI_KEY", "SERPAPI_KEY")
+    )
+    search_engine: str = "google"
+
+    # --- HTTP API -----------------------------------------------------------
+    # The API has no authentication unless api_token is set, so it listens on
+    # the loopback interface by default.
+    api_host: str = "127.0.0.1"
+    api_port: int | None = Field(
+        default=None, ge=1, le=65535, description="Unset: first free candidate port."
+    )
+    # Browser origins allowed to call the API. Empty means no CORS headers at
+    # all: pages on other origins cannot read responses.
+    cors_allow_origins: Annotated[tuple[str, ...], NoDecode] = ()
+    max_upload_mb: int = Field(default=50, ge=1)
+    # When set, every /api request must carry "Authorization: Bearer <token>".
+    api_token: SecretStr | None = None
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> object:
+        return _split_csv(value)
+
+    @field_validator("ollama_base_url", "openai_base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        return value.strip().rstrip("/")
+
+    @field_validator("api_token", "openai_api_key", "serpapi_key")
+    @classmethod
+    def _drop_blank_or_placeholder_secrets(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None or not is_configured_secret(value):
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def _overlap_must_leave_room_for_new_text(self) -> Settings:
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError(
+                f"chunk_overlap ({self.chunk_overlap}) must be smaller than chunk_size ({self.chunk_size})"
+            )
+        return self
+
+    # --- Derived values -----------------------------------------------------
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def openai_configured(self) -> bool:
+        return self.openai_api_key is not None
+
+    @property
+    def serpapi_configured(self) -> bool:
+        return self.serpapi_key is not None
 
 
-def is_configured_api_key(api_key: str | None) -> bool:
-    """True when ``api_key`` is a real value rather than empty or a ``Your...`` placeholder."""
-    return bool(api_key and api_key.strip() and not api_key.strip().startswith("Your"))
+def is_configured_secret(secret: SecretStr | str | None) -> bool:
+    """True when ``secret`` is a real value rather than empty or a ``Your...`` placeholder."""
+    if secret is None:
+        return False
+    value = secret.get_secret_value() if isinstance(secret, SecretStr) else secret
+    value = value.strip()
+    return bool(value) and not value.startswith(_PLACEHOLDER_PREFIX)
 
 
-def ollama_available(base_url: str = OLLAMA_BASE_URL, timeout: float = 2.0) -> bool:
+# --- Process-wide access ----------------------------------------------------
+
+_settings: Settings | None = None
+# The default provider resolved for the current settings; probing Ollama is
+# done once, not on every request.
+_default_provider: Provider | None = None
+
+
+def get_settings() -> Settings:
+    """The process-wide settings, loaded from the environment on first use."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def set_settings(settings: Settings | None) -> None:
+    """Install ``settings`` process-wide; ``None`` reloads from the environment on next use.
+
+    Used by tests and by programs embedding the service. Cached decisions
+    derived from the previous settings, such as the default provider, are
+    discarded.
+    """
+    global _settings, _default_provider
+    _settings = settings
+    _default_provider = None
+
+
+# --- Provider selection -----------------------------------------------------
+
+
+def ollama_available(base_url: str, timeout: float = 2.0) -> bool:
     """True when an Ollama server answers at ``base_url``."""
     try:
         return requests.get(f"{base_url}/api/tags", timeout=timeout).status_code == 200
@@ -100,43 +192,49 @@ def ollama_available(base_url: str = OLLAMA_BASE_URL, timeout: float = 2.0) -> b
 
 
 def choose_default_provider(
-    explicit: str | None,
-    ollama_reachable: bool,
-    openai_key: str | None,
+    explicit: Provider | None, ollama_reachable: bool, openai_configured: bool
 ) -> Provider:
     """Pick the provider to use when a request does not name one.
 
-    An explicit ``LLM_PROVIDER`` wins. Otherwise local Ollama is preferred,
-    then an OpenAI-compatible endpoint with a configured key. With nothing
-    available the choice stays ``ollama`` and the call fails with a clear error.
+    An explicit ``RAG_LLM_PROVIDER`` wins. Otherwise local Ollama is
+    preferred, then an OpenAI-compatible endpoint with a configured key. With
+    nothing available the choice stays ``ollama`` and the call fails with a
+    clear error.
     """
-    if explicit:
-        if explicit not in PROVIDER_CHOICES:
-            raise ValueError(f"LLM_PROVIDER must be one of {PROVIDER_CHOICES}, got {explicit!r}")
+    if explicit is not None:
         return explicit
     if ollama_reachable:
         return "ollama"
-    if is_configured_api_key(openai_key):
+    if openai_configured:
         return "openai"
     return "ollama"
 
 
-@lru_cache(maxsize=1)
 def detect_default_provider() -> Provider:
-    """Resolve the default provider once, probing Ollama only when needed."""
-    if LLM_PROVIDER:
-        provider = choose_default_provider(LLM_PROVIDER, False, OPENAI_API_KEY)
-        logger.info("LLM provider set explicitly: %s", provider)
-        return provider
+    """Resolve the default provider once per settings, probing Ollama only when needed."""
+    global _default_provider
+    if _default_provider is None:
+        _default_provider = _detect_default_provider(get_settings())
+    return _default_provider
 
-    reachable = ollama_available()
-    provider = choose_default_provider(None, reachable, OPENAI_API_KEY)
+
+def _detect_default_provider(settings: Settings) -> Provider:
+    if settings.llm_provider is not None:
+        logger.info("LLM provider set explicitly: %s", settings.llm_provider)
+        return settings.llm_provider
+
+    reachable = ollama_available(settings.ollama_base_url)
+    provider = choose_default_provider(None, reachable, settings.openai_configured)
     if reachable:
-        logger.info("Ollama detected at %s; using local model %s", OLLAMA_BASE_URL, OLLAMA_MODEL)
+        logger.info("Ollama detected at %s; using model %s", settings.ollama_base_url, settings.ollama_model)
     elif provider == "openai":
-        logger.info("OPENAI_API_KEY configured; using %s at %s", OPENAI_MODEL, OPENAI_BASE_URL)
+        logger.info(
+            "OpenAI API key configured; using %s at %s", settings.openai_model, settings.openai_base_url
+        )
     else:
-        logger.warning("No LLM backend available: start Ollama at %s or set OPENAI_API_KEY", OLLAMA_BASE_URL)
+        logger.warning(
+            "No LLM backend available: start Ollama at %s or set OPENAI_API_KEY", settings.ollama_base_url
+        )
     return provider
 
 

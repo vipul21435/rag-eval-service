@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from ragsvc.config import CHUNK_OVERLAP, CHUNK_SIZE
+from ragsvc.config import get_settings
 
 # Tried in order: paragraph, line, CJK full stop / comma / semicolon / colon,
 # space, then individual characters as a last resort.
@@ -21,9 +21,10 @@ def split_text(text: str, chunk_size: int | None = None, chunk_overlap: int | No
 
     ``chunk_size`` and ``chunk_overlap`` default to the configured values.
     """
+    settings = get_settings()
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE if chunk_size is None else chunk_size,
-        chunk_overlap=CHUNK_OVERLAP if chunk_overlap is None else chunk_overlap,
+        chunk_size=settings.chunk_size if chunk_size is None else chunk_size,
+        chunk_overlap=settings.chunk_overlap if chunk_overlap is None else chunk_overlap,
         separators=SEPARATORS,
     )
     return splitter.split_text(text)

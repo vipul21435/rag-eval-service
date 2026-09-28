@@ -1,8 +1,12 @@
 """REST API: FastAPI application exposing upload, ask and status endpoints.
 
 Security defaults are local-first: the server binds the loopback interface,
-sends no CORS headers, caps upload size and, when ``API_TOKEN`` is set,
-requires a bearer token on every ``/api`` request. See ``config.py``.
+sends no CORS headers, caps upload size and, when ``RAG_API_TOKEN`` is set,
+requires a bearer token on every ``/api`` request. See ``ragsvc.config``.
+
+``create_app`` is the application factory; there is no module-level app so
+that settings are read when the application is built, not when the module
+is imported (``uvicorn --factory ragsvc.api:create_app``).
 """
 
 from __future__ import annotations
@@ -12,54 +16,50 @@ import logging
 import os
 import secrets
 import tempfile
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ragsvc import __version__
-from ragsvc.config import (
-    API_HOST,
-    API_TOKEN,
-    CORS_ALLOW_ORIGINS,
-    MAX_UPLOAD_MB,
-    OLLAMA_MODEL,
-    OPENAI_API_KEY,
-    OPENAI_MODEL,
-    Provider,
-    detect_default_provider,
-    is_configured_api_key,
-    resolve_provider,
-)
+from ragsvc.config import Provider, Settings, detect_default_provider, get_settings, resolve_provider
 from ragsvc.core.document_loader import SUPPORTED_EXTENSIONS, describe_supported_formats
 from ragsvc.core.generator import KnowledgeBaseEmptyError, ProviderError, answer_question
 from ragsvc.core.ingest import SourceFile, ingest_files
 from ragsvc.core.vector_store import vector_store
-from ragsvc.features.web_search import check_serpapi_key
 
 logger = logging.getLogger("rag-api")
 
 CANDIDATE_PORTS = (17995, 17996, 17997, 17998, 17999)
-MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
-# --- Authentication ---------------------------------------------------------
+# --- Dependencies -------------------------------------------------------------
 
 
-async def require_api_token(authorization: Annotated[str | None, Header()] = None) -> None:
+def app_settings(request: Request) -> Settings:
+    """The settings the application was built with."""
+    settings: Settings = request.app.state.settings
+    return settings
+
+
+async def require_api_token(
+    settings: Annotated[Settings, Depends(app_settings)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
     """Reject the request unless it carries the configured bearer token.
 
-    A no-op when ``API_TOKEN`` is unset (the local-first default).
+    A no-op when no API token is configured (the local-first default).
     """
-    expected = API_TOKEN
-    if expected is None:
+    if settings.api_token is None:
         return
     scheme, _, token = (authorization or "").partition(" ")
+    expected = settings.api_token.get_secret_value()
     if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip(), expected):
         raise HTTPException(401, "missing or invalid API token", headers={"WWW-Authenticate": "Bearer"})
 
@@ -91,16 +91,16 @@ class FileProcessResult(BaseModel):
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_token)])
 
 
-async def _spool_upload(file: UploadFile, suffix: str) -> str:
-    """Copy ``file`` to a temp file in chunks; 413 once it exceeds the limit."""
+async def _spool_upload(file: UploadFile, suffix: str, limit: int) -> str:
+    """Copy ``file`` to a temp file in chunks; 413 once it exceeds ``limit`` bytes."""
     written = 0
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp_path = tmp.name
         try:
             while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
                 written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    raise HTTPException(413, f"file exceeds the upload limit of {MAX_UPLOAD_BYTES} bytes")
+                if written > limit:
+                    raise HTTPException(413, f"file exceeds the upload limit of {limit} bytes")
                 tmp.write(chunk)
         except BaseException:
             tmp.close()
@@ -110,7 +110,10 @@ async def _spool_upload(file: UploadFile, suffix: str) -> str:
 
 
 @router.post("/upload", response_model=FileProcessResult)
-async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
+async def upload_file(
+    file: Annotated[UploadFile, File(...)],
+    settings: Annotated[Settings, Depends(app_settings)],
+) -> dict[str, Any]:
     """Index one document, replacing the current knowledge base.
 
     A document that yields no text leaves the previous knowledge base in
@@ -123,7 +126,7 @@ async def upload_file(file: Annotated[UploadFile, File(...)]) -> dict[str, Any]:
             415, f"unsupported file format {suffix or '(none)'!r}; supported: {describe_supported_formats()}"
         )
 
-    tmp_path = await _spool_upload(file, suffix)
+    tmp_path = await _spool_upload(file, suffix, settings.max_upload_bytes)
     try:
         report = await asyncio.to_thread(ingest_files, [SourceFile(path=Path(tmp_path), name=filename)])
     except Exception as exc:
@@ -170,15 +173,15 @@ async def ask_question(req: QuestionRequest) -> dict[str, Any]:
 
 
 @router.get("/status")
-async def check_status() -> dict[str, Any]:
+async def check_status(settings: Annotated[Settings, Depends(app_settings)]) -> dict[str, Any]:
     return {
         "status": "healthy",
         "version": __version__,
         "default_provider": detect_default_provider(),
-        "ollama_model": OLLAMA_MODEL,
-        "openai_configured": is_configured_api_key(OPENAI_API_KEY),
-        "openai_model": OPENAI_MODEL,
-        "serpapi_configured": check_serpapi_key(),
+        "ollama_model": settings.ollama_model,
+        "openai_configured": settings.openai_configured,
+        "openai_model": settings.openai_model,
+        "serpapi_configured": settings.serpapi_configured,
         "vector_store_ready": vector_store.is_ready,
         "total_chunks": vector_store.total_chunks,
     }
@@ -188,39 +191,42 @@ async def check_status() -> dict[str, Any]:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings: Settings = app.state.settings
     logger.info("API starting; default LLM provider: %s", detect_default_provider())
-    if API_TOKEN is None and API_HOST not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning("API_HOST=%s without API_TOKEN: the API is reachable without authentication", API_HOST)
+    if settings.api_token is None and settings.api_host not in _LOOPBACK_HOSTS:
+        logger.warning(
+            "RAG_API_HOST=%s without RAG_API_TOKEN: the API is reachable without authentication",
+            settings.api_host,
+        )
     yield
     logger.info("API stopped")
 
 
-def create_app(cors_origins: Sequence[str] | None = None) -> FastAPI:
-    """Build the application.
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the application from ``settings`` (default: the process-wide settings).
 
-    ``cors_origins`` lists the browser origins allowed to call the API; it
-    defaults to ``CORS_ALLOW_ORIGINS``. With no origins, no CORS middleware is
-    installed and browsers block cross-origin reads. Credentials are never
-    allowed, so an allowed origin cannot ride on the operator's cookies.
+    ``settings.cors_allow_origins`` lists the browser origins allowed to call
+    the API. With no origins, no CORS middleware is installed and browsers
+    block cross-origin reads. Credentials are never allowed, so an allowed
+    origin cannot ride on the operator's cookies.
     """
+    if settings is None:
+        settings = get_settings()
     application = FastAPI(
         title="rag-eval-service",
         description="Document question answering over local FAISS + BM25 hybrid retrieval",
         version=__version__,
         lifespan=lifespan,
     )
-    origins = list(CORS_ALLOW_ORIGINS if cors_origins is None else cors_origins)
-    if origins:
+    application.state.settings = settings
+    if settings.cors_allow_origins:
         application.add_middleware(
             CORSMiddleware,
-            allow_origins=origins,
+            allow_origins=list(settings.cors_allow_origins),
             allow_credentials=False,
             allow_methods=["GET", "POST"],
             allow_headers=["Authorization", "Content-Type"],
         )
     application.include_router(router)
     return application
-
-
-app = create_app()

@@ -9,7 +9,7 @@ from ragsvc.core.ingest import FileResult, IngestReport
 
 @pytest.fixture
 def client():
-    return TestClient(api.app)
+    return TestClient(api.create_app())
 
 
 def test_upload_returns_chunk_count_and_removes_temp_file(client, monkeypatch):

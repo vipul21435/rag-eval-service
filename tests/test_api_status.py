@@ -5,8 +5,7 @@ from ragsvc import __version__, api
 
 def test_status_reports_version_and_local_defaults_without_credentials(monkeypatch):
     monkeypatch.setattr(api, "detect_default_provider", lambda: "ollama")
-    monkeypatch.setattr(api, "OPENAI_API_KEY", None)
-    client = TestClient(api.app)
+    client = TestClient(api.create_app())
 
     status = client.get("/api/status").json()
 

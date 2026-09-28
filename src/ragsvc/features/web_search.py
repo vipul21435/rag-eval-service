@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 
 import requests
 
-from ragsvc.config import SEARCH_ENGINE, SERPAPI_KEY
+from ragsvc.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +25,19 @@ class WebResult(TypedDict, total=False):
 
 
 def check_serpapi_key() -> bool:
-    """True when ``SERPAPI_KEY`` holds a real value rather than a placeholder."""
-    return SERPAPI_KEY is not None and SERPAPI_KEY.strip() != "" and not SERPAPI_KEY.startswith("Your")
+    """True when a SerpAPI key is configured (``RAG_SERPAPI_KEY`` or ``SERPAPI_KEY``)."""
+    return get_settings().serpapi_configured
 
 
 def serpapi_search(query: str, num_results: int = 5) -> list[WebResult]:
     """Query SerpAPI; returns an empty list on any request failure."""
-    if not SERPAPI_KEY:
+    settings = get_settings()
+    if settings.serpapi_key is None:
         raise ValueError("SERPAPI_KEY is not set")
     params: dict[str, str | int] = {
-        "engine": SEARCH_ENGINE,
+        "engine": settings.search_engine,
         "q": query,
-        "api_key": SERPAPI_KEY,
+        "api_key": settings.serpapi_key.get_secret_value(),
         "num": num_results,
         "hl": "en",
         "gl": "us",

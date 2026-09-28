@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ragsvc.config import HYBRID_ALPHA, MAX_RETRIEVAL_ITERATIONS, RERANK_TOP_K, RETRIEVAL_TOP_K, Provider
+from ragsvc.config import Provider, get_settings
 from ragsvc.core.bm25_index import BM25Hit, bm25_manager
 from ragsvc.core.embeddings import encode_query
 from ragsvc.core.reranker import RankedDocs, ScoredDoc, rerank_results
@@ -59,7 +59,7 @@ def hybrid_merge(
     returns. The result is sorted best first.
     """
     if alpha is None:
-        alpha = HYBRID_ALPHA
+        alpha = get_settings().hybrid_alpha
 
     merged: dict[str, ScoredDoc] = {}
 
@@ -156,8 +156,10 @@ def recursive_retrieval(
 
     Returns ``(contexts, doc_ids, metadata)`` with parallel positions.
     """
+    settings = get_settings()
     if max_iterations is None:
-        max_iterations = MAX_RETRIEVAL_ITERATIONS
+        max_iterations = settings.max_retrieval_iterations
+    retrieval_top_k = settings.retrieval_top_k
 
     query = initial_query
     all_contexts: list[str] = []
@@ -173,20 +175,20 @@ def recursive_retrieval(
             web_texts = _web_search_round(query, seen_web_sources, all_contexts, all_doc_ids, all_metadata)
 
         query_embedding = encode_query(query)
-        sem_docs, sem_ids, sem_metas = vector_store.search(query_embedding, k=RETRIEVAL_TOP_K)
+        sem_docs, sem_ids, sem_metas = vector_store.search(query_embedding, k=retrieval_top_k)
         semantic = {"ids": [sem_ids], "documents": [sem_docs], "metadatas": [sem_metas]}
 
-        bm25_res = bm25_manager.search(query, top_k=RETRIEVAL_TOP_K)
+        bm25_res = bm25_manager.search(query, top_k=retrieval_top_k)
 
-        hybrid = hybrid_merge(semantic, bm25_res)
-        ids_iter = [doc_id for doc_id, _ in hybrid[:RETRIEVAL_TOP_K]]
-        docs_iter = [data["content"] for _, data in hybrid[:RETRIEVAL_TOP_K]]
-        meta_iter = [data["metadata"] for _, data in hybrid[:RETRIEVAL_TOP_K]]
+        hybrid = hybrid_merge(semantic, bm25_res, alpha=settings.hybrid_alpha)
+        ids_iter = [doc_id for doc_id, _ in hybrid[:retrieval_top_k]]
+        docs_iter = [data["content"] for _, data in hybrid[:retrieval_top_k]]
+        meta_iter = [data["metadata"] for _, data in hybrid[:retrieval_top_k]]
 
         reranked: RankedDocs = []
         if docs_iter:
             try:
-                reranked = rerank_results(query, docs_iter, ids_iter, meta_iter, top_k=RERANK_TOP_K)
+                reranked = rerank_results(query, docs_iter, ids_iter, meta_iter, top_k=settings.rerank_top_k)
             except Exception as exc:  # noqa: BLE001 - fall back to the hybrid order
                 logger.error("Reranking failed: %s", exc)
                 reranked = [

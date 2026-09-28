@@ -32,7 +32,7 @@ def preflight(client: TestClient, origin: str, path: str = "/api/ask"):
 
 
 def test_default_app_sends_no_cors_headers_to_any_origin():
-    client = TestClient(api.app)
+    client = TestClient(api.create_app())
 
     assert "access-control-allow-origin" not in preflight(client, EVIL).headers
     response = client.get("/api/status", headers={"Origin": EVIL, "Cookie": "session=abc"})
@@ -41,8 +41,8 @@ def test_default_app_sends_no_cors_headers_to_any_origin():
     assert "access-control-allow-credentials" not in response.headers
 
 
-def test_allowlisted_origin_is_admitted_without_credentials_and_others_are_not():
-    client = TestClient(api.create_app(cors_origins=[ALLOWED]))
+def test_allowlisted_origin_is_admitted_without_credentials_and_others_are_not(settings):
+    client = TestClient(api.create_app(settings(cors_allow_origins=[ALLOWED])))
 
     allowed = preflight(client, ALLOWED)
     assert allowed.status_code == 200
@@ -55,8 +55,8 @@ def test_allowlisted_origin_is_admitted_without_credentials_and_others_are_not()
     assert "access-control-allow-origin" not in actual.headers
 
 
-def test_app_factory_defaults_to_the_configured_allowlist(monkeypatch):
-    monkeypatch.setattr(api, "CORS_ALLOW_ORIGINS", (ALLOWED,))
+def test_app_factory_defaults_to_the_installed_settings(settings):
+    settings(cors_allow_origins=[ALLOWED])
     client = TestClient(api.create_app())
 
     assert preflight(client, ALLOWED).headers["access-control-allow-origin"] == ALLOWED
@@ -65,27 +65,28 @@ def test_app_factory_defaults_to_the_configured_allowlist(monkeypatch):
 # --- Upload size ------------------------------------------------------------
 
 
-def test_upload_over_the_size_limit_is_rejected_before_ingestion(monkeypatch, tmp_path):
-    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 16)
-    monkeypatch.setattr(api, "_UPLOAD_CHUNK_BYTES", 4)
+ONE_MB = 1024 * 1024
+
+
+def test_upload_over_the_size_limit_is_rejected_before_ingestion(settings, monkeypatch, tmp_path):
+    settings(max_upload_mb=1)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
     def unexpected_ingest(sources, progress=None):
         raise AssertionError("an oversized upload must be rejected before ingestion starts")
 
     monkeypatch.setattr(api, "ingest_files", unexpected_ingest)
-    client = TestClient(api.app)
+    client = TestClient(api.create_app())
 
-    response = client.post("/api/upload", files={"file": ("big.md", b"x" * 17, "text/markdown")})
+    response = client.post("/api/upload", files={"file": ("big.md", b"x" * (ONE_MB + 1), "text/markdown")})
 
     assert response.status_code == 413
-    assert "upload limit of 16 bytes" in response.json()["detail"]
+    assert f"upload limit of {ONE_MB} bytes" in response.json()["detail"]
     assert list(tmp_path.iterdir()) == [], "the partial temp file must be removed"
 
 
-def test_upload_at_the_size_limit_is_accepted(monkeypatch):
-    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 16)
-    monkeypatch.setattr(api, "_UPLOAD_CHUNK_BYTES", 4)
+def test_upload_at_the_size_limit_is_accepted(settings, monkeypatch):
+    settings(max_upload_mb=1)
     seen: dict[str, object] = {}
 
     def fake_ingest(sources, progress=None):
@@ -95,12 +96,12 @@ def test_upload_at_the_size_limit_is_accepted(monkeypatch):
         return IngestReport(files=[FileResult(name=source.name, chunks=1)], total_chunks=1)
 
     monkeypatch.setattr(api, "ingest_files", fake_ingest)
-    client = TestClient(api.app)
+    client = TestClient(api.create_app())
 
-    response = client.post("/api/upload", files={"file": ("ok.md", b"x" * 16, "text/markdown")})
+    response = client.post("/api/upload", files={"file": ("ok.md", b"x" * ONE_MB, "text/markdown")})
 
     assert response.status_code == 200
-    assert seen["content"] == b"x" * 16
+    assert seen["content"] == b"x" * ONE_MB
     assert not os.path.exists(str(seen["path"]))
 
 
@@ -108,9 +109,8 @@ def test_upload_at_the_size_limit_is_accepted(monkeypatch):
 
 
 @pytest.fixture
-def token_client(monkeypatch):
-    monkeypatch.setattr(api, "API_TOKEN", "s3cret")
-    return TestClient(api.app)
+def token_client(settings):
+    return TestClient(api.create_app(settings(api_token="s3cret")))
 
 
 @pytest.mark.parametrize(
@@ -137,7 +137,5 @@ def test_valid_bearer_token_is_accepted(token_client):
     assert response.json()["status"] == "healthy"
 
 
-def test_no_token_configured_means_open_access(monkeypatch):
-    monkeypatch.setattr(api, "API_TOKEN", None)
-
-    assert TestClient(api.app).get("/api/status").status_code == 200
+def test_no_token_configured_means_open_access():
+    assert TestClient(api.create_app()).get("/api/status").status_code == 200

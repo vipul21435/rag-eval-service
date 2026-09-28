@@ -21,10 +21,10 @@ def test_split_text_prefers_paragraph_boundaries():
     assert chunks == ["First paragraph.", "Second paragraph.", "Third paragraph."]
 
 
-def test_split_text_uses_configured_defaults():
-    from ragsvc.config import CHUNK_SIZE
+def test_split_text_uses_configured_defaults(settings):
+    settings(chunk_size=12, chunk_overlap=0)
 
-    chunks = split_text("short text")
+    chunks = split_text("short text that is longer than twelve characters")
 
-    assert chunks == ["short text"]
-    assert all(len(chunk) <= CHUNK_SIZE for chunk in chunks)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 12 for chunk in chunks)

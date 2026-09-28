@@ -54,7 +54,7 @@ uv run ragsvc               # or: uv run python -m ragsvc
 ```
 
 The API listens on `127.0.0.1` and the first free port in `17995-17999`
-(`API_HOST`, `API_PORT`). Main endpoints:
+(`RAG_API_HOST`, `RAG_API_PORT`). Main endpoints:
 
 - `GET /api/status`: runtime and provider configuration status;
 - `POST /api/upload`: upload a document (PDF, TXT, Markdown; DOCX, PPTX and
@@ -70,39 +70,44 @@ The API listens on `127.0.0.1` and the first free port in `17995-17999`
 Embedding and reranking models are downloaded from the Hugging Face Hub on
 first use and cached locally. Answer generation needs an LLM: a local
 [Ollama](https://ollama.com/) server is used when one is running, otherwise
-any OpenAI-compatible endpoint configured through `OPENAI_*`. Without either,
+any OpenAI-compatible endpoint configured through `RAG_OPENAI_*`. Without either,
 upload and retrieval work and `/api/ask` returns `502` with a clear message.
 
 ## Configuration
 
-Every variable is optional; see [`.env.example`](.env.example) for the full
-list with defaults.
+Settings are typed and validated on startup (`ragsvc.config.Settings`,
+built on pydantic-settings). They are read from `RAG_`-prefixed environment
+variables and, below them, from a `.env` file in the working directory; an
+out-of-range value or an unknown provider name stops the server with a
+message naming the variable. Every variable is optional; see
+[`.env.example`](.env.example) for the full list with defaults.
 
 | Variable | Purpose |
 | --- | --- |
-| `LLM_PROVIDER` | Force `ollama` or `openai` instead of auto-detecting |
-| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Local Ollama server and model (`llama3.2`) |
-| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | Any OpenAI-compatible Chat Completions endpoint |
-| `EMBED_MODEL_NAME` | Sentence-transformers embedding model (`all-MiniLM-L6-v2`) |
-| `RERANK_METHOD`, `RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
-| `CHUNK_SIZE`, `CHUNK_OVERLAP`, `HYBRID_ALPHA`, `RETRIEVAL_TOP_K`, `RERANK_TOP_K`, `MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
-| `SERPAPI_KEY` | Optional web-search credential |
-| `API_HOST`, `API_PORT` | Bind address (`127.0.0.1`) and port (first free in `17995-17999`) |
-| `CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
-| `MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
-| `API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
+| `RAG_LLM_PROVIDER` | Force `ollama` or `openai` instead of auto-detecting |
+| `RAG_OLLAMA_BASE_URL`, `RAG_OLLAMA_MODEL` | Local Ollama server and model (`llama3.2`) |
+| `RAG_OPENAI_API_KEY`, `RAG_OPENAI_BASE_URL`, `RAG_OPENAI_MODEL` | Any OpenAI-compatible Chat Completions endpoint; the key and base URL are also read from `OPENAI_API_KEY` and `OPENAI_BASE_URL` |
+| `RAG_EMBED_MODEL_NAME` | Sentence-transformers embedding model (`all-MiniLM-L6-v2`) |
+| `RAG_RERANK_METHOD`, `RAG_RERANK_MODEL_NAME` | `cross_encoder` (default), `llm` or `none`; cross-encoder model |
+| `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_HYBRID_ALPHA`, `RAG_RETRIEVAL_TOP_K`, `RAG_RERANK_TOP_K`, `RAG_MAX_RETRIEVAL_ITERATIONS` | Retrieval hyperparameters |
+| `RAG_SERPAPI_KEY` | Optional web-search credential (also `SERPAPI_KEY`) |
+| `RAG_API_HOST`, `RAG_API_PORT` | Bind address (`127.0.0.1`) and port (first free in `17995-17999`) |
+| `RAG_CORS_ALLOW_ORIGINS` | Comma-separated browser origins allowed to call the API (none by default) |
+| `RAG_MAX_UPLOAD_MB` | Largest document `/api/upload` accepts (`50`) |
+| `RAG_API_TOKEN` | When set, every `/api` request needs `Authorization: Bearer <token>` |
 
 ## Exposing the API
 
 The defaults keep the service private to the machine it runs on: it binds
 the loopback interface, sends no CORS headers (so a web page on another
 origin cannot read answers or replace the knowledge base through the
-operator's browser), and caps uploads at `MAX_UPLOAD_MB`. To reach it from
-other hosts or a browser front end, set `API_HOST=0.0.0.0`, list the front
-end's origin in `CORS_ALLOW_ORIGINS`, and set `API_TOKEN`; the server logs a
-warning when it is exposed without a token. Indexed documents and answers
-are only as private as whoever can reach the port, so put a reverse proxy
-with TLS in front for anything beyond a trusted network.
+operator's browser), and caps uploads at `RAG_MAX_UPLOAD_MB`. To reach it
+from other hosts or a browser front end, set `RAG_API_HOST=0.0.0.0`, list
+the front end's origin in `RAG_CORS_ALLOW_ORIGINS`, and set
+`RAG_API_TOKEN`; the server logs a warning when it is exposed without a
+token. Indexed documents and answers are only as private as whoever can
+reach the port, so put a reverse proxy with TLS in front for anything
+beyond a trusted network.
 
 ## Repository layout
 
@@ -114,7 +119,7 @@ src/ragsvc/
   __init__.py              Package version
   __main__.py              `python -m ragsvc` / `ragsvc`: serve the API
   api.py                   FastAPI application
-  config.py                Environment, model and retrieval settings
+  config.py                Typed RAG_ settings: providers, models, retrieval, API
   core/
     document_loader.py     Document text extraction
     text_splitter.py       Text chunking

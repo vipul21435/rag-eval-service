@@ -14,14 +14,7 @@ from typing import Any
 
 import requests
 
-from ragsvc.config import (
-    OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
-    OPENAI_API_KEY,
-    OPENAI_BASE_URL,
-    OPENAI_MODEL,
-    Provider,
-)
+from ragsvc.config import Provider, get_settings
 from ragsvc.core.retriever import recursive_retrieval
 from ragsvc.core.vector_store import Metadata, vector_store
 from ragsvc.features.conflict_detector import detect_conflicts
@@ -132,8 +125,16 @@ def _call_openai_compatible_api(
 
 def call_openai_api(prompt: str, temperature: float = 0.7, max_tokens: int = 1024) -> str:
     """Call the configured OpenAI-compatible endpoint."""
+    settings = get_settings()
+    api_key = settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
     return _call_openai_compatible_api(
-        "OpenAI-compatible", OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, prompt, temperature, max_tokens
+        "OpenAI-compatible",
+        api_key,
+        settings.openai_base_url,
+        settings.openai_model,
+        prompt,
+        temperature,
+        max_tokens,
     )
 
 
@@ -142,17 +143,18 @@ def call_openai_api(prompt: str, temperature: float = 0.7, max_tokens: int = 102
 
 def call_ollama_api(prompt: str) -> str:
     """Call the local Ollama server's generate endpoint."""
+    settings = get_settings()
     try:
         response = get_session().post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            f"{settings.ollama_base_url}/api/generate",
+            json={"model": settings.ollama_model, "prompt": prompt, "stream": False},
             timeout=DEFAULT_TIMEOUT,
             headers={"Connection": "close"},
         )
         response.raise_for_status()
         result = response.json()
     except (requests.exceptions.RequestException, ValueError) as exc:
-        raise ProviderError(f"Ollama request to {OLLAMA_BASE_URL} failed: {exc}") from exc
+        raise ProviderError(f"Ollama request to {settings.ollama_base_url} failed: {exc}") from exc
     text = result.get("response")
     if not text:
         raise ProviderError("Ollama returned an empty response")
