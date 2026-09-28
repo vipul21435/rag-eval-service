@@ -128,6 +128,12 @@ class Settings(BaseSettings):
     # When set, every /api request must carry "Authorization: Bearer <token>".
     api_token: SecretStr | None = None
 
+    # --- MCP server ---------------------------------------------------------
+    # The MCP ingest_document tool only reads files under this directory.
+    mcp_document_root: Path = Field(
+        default=Path("."), description="Directory the MCP server may ingest documents from."
+    )
+
     # --- Logging ------------------------------------------------------------
     log_level: str = Field(default="INFO", description="Root log level name (DEBUG, INFO, WARNING, ...).")
     log_format: LogFormat = Field(default="json", description="json: one object per line; text: readable.")

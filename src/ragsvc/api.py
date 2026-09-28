@@ -242,12 +242,12 @@ async def check_status(settings: Annotated[Settings, Depends(app_settings)]) -> 
 ops_router = APIRouter(tags=["health"])
 
 
-@ops_router.get("/health", response_model=HealthResponse)
-async def health(settings: Annotated[Settings, Depends(app_settings)]) -> HealthResponse:
-    """Liveness: the process is up, and what it is running with.
+def health_snapshot(settings: Settings) -> HealthResponse:
+    """What the process is running with: providers, index size, cache counters.
 
     Cheap by construction: it names the embedding provider and model without
-    loading the model, and reads the cache counters without embedding.
+    loading the model, and reads the cache counters without embedding. Shared
+    by ``GET /health`` and the MCP ``health`` tool.
     """
     embedder = get_embedder()
     cache = EmbeddingCacheInfo(enabled=False)
@@ -269,6 +269,12 @@ async def health(settings: Annotated[Settings, Depends(app_settings)]) -> Health
         ),
         embedding_cache=cache,
     )
+
+
+@ops_router.get("/health", response_model=HealthResponse)
+async def health(settings: Annotated[Settings, Depends(app_settings)]) -> HealthResponse:
+    """Liveness: the process is up, and what it is running with."""
+    return health_snapshot(settings)
 
 
 @ops_router.get("/ready", response_model=ReadyResponse, responses={503: {"model": ReadyResponse}})
